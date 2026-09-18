@@ -1,103 +1,317 @@
-import { useForm } from "react-hook-form";
-import { z } from "zod";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useState } from "react";
 
-const registerSchema = z //Think of a schema as a set of rules for your registration form.
+import { useForm } from "react-hook-form"; //imports useForm from React Hook Form to manage the form.
+import { z } from "zod"; //imports Zod to create validation rules for the form.
+import { zodResolver } from "@hookform/resolvers/zod"; //connects Zod validation with React Hook Form.
+
+import { useNavigate } from "react-router-dom";
+import { useRegisterMutation } from "../services/authApi";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Eye, EyeOff } from "lucide-react";
+
+//Think of a schema as a set of rules for your registration form.
+const registerSchema = z
   .object({
+    //Name must be a string and cannot be empty.
     name: z.string().min(1, { message: "Name is required" }),
 
+    //Email must be a string and must have a valid email format.
     email: z
       .string()
       .min(1, "Email is required")
-      .email("Enter a valid email"),
+      .pipe(z.email("Enter a valid email")),
 
+    //Password must be a string and must contain at least 8 characters.
     password: z
       .string()
       .min(8, "Password must be at least 8 characters long"),
 
+    //Confirm password must not be empty.
     confirmPassword: z
       .string()
       .min(1, "Please confirm your password"),
   })
+
+  //This checks whether password and confirmPassword have the same value.
   .refine((data) => data.password === data.confirmPassword, {
     message: "Passwords do not match",
     path: ["confirmPassword"],
   });
 
-function Register() {
+//This tells TypeScript what data our registration form contains.
+type RegisterFormData = z.infer<typeof registerSchema>;
+
+export default function Register() {
+  //This allows us to move the user to another page.
+  const navigate = useNavigate();
+
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  //This connects the Register page to our register API.
+  const [registerUser, { isLoading }] = useRegisterMutation();
+
+  //This stores registration error messages.
+  const [errorMessage, setErrorMessage] = useState("");
+
   const {
-    register,
+    register: registerField,
     handleSubmit,
     formState: { errors },
-  } = useForm({
-    resolver: zodResolver(registerSchema),//connects React Hook Form with Zod.
+  } = useForm<RegisterFormData>({
+    //this connects the Zod schema to React Hook Form.
+    //It will validate the form data against the schema when the form is submitted.
+    resolver: zodResolver(registerSchema),
   });
 
-  const onSubmit = (data: any) => {
-    console.log(data);
+  //This function runs after the form is successfully submitted through handleSubmit.
+  const onSubmit = async (data: RegisterFormData) => {
+    console.log("Register button clicked");
+    console.log("Form data:", data);
+
+    //Clear previous error message.
+    setErrorMessage("");
+
+    try {
+      //Send the user's name, email and password to the backend.
+      const response = await registerUser({
+        name: data.name,
+        email: data.email,
+        password: data.password,
+        confirmPassword: data.confirmPassword,
+      }).unwrap();
+
+      console.log("Registration successful:", response);
+
+      //After successful registration, move to the email verification page.
+      navigate("/verify-email");
+    } catch (error: any) {
+      //If registration fails, show the error in the console.
+      console.error("Registration error:", error);
+
+      //Show backend error message on the page.
+      setErrorMessage(
+        error?.data?.message ||
+          "Registration failed. Please try again."
+      );
+    }
   };
 
+  //This function runs if Zod validation fails.
+  const onInvalid = (errors: any) => {
+    console.error("Validation errors:", errors);
+  };
+
+  //UI
   return (
-    <div>
-      <h1>Create An Account</h1>
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-10">
+      <div className="w-full max-w-md">
 
-      <form onSubmit={handleSubmit(onSubmit)}>
-        <div>
-          <label>Name</label>
+        {/* Sprintly Brand */}
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-bold tracking-tight text-slate-900">
+            Sprintly
+          </h1>
 
-          <input
-            type="text"
-            placeholder="Enter your name"
-            {...register("name")}
-          />
-
-          {errors.name && <p>{errors.name.message}</p>}
+          <p className="mt-2 text-sm text-slate-500">
+            Manage your projects, tasks, and teams.
+          </p>
         </div>
 
-        <div>
-          <label>Email</label>
+        {/* Register Card */}
+        <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-8">
 
-          <input
-            type="email"
-            placeholder="Enter your email"
-            {...register("email")}
-          />
+          {/* Heading */}
+          <div className="mb-6">
+            <h2 className="text-2xl font-semibold text-slate-900">
+              Create an account
+            </h2>
 
-          {errors.email && <p>{errors.email.message}</p>}
-        </div>
+            <p className="mt-1 text-sm text-slate-500">
+              Enter your details to get started.
+            </p>
+          </div>
 
-        <div>
-          <label>Password</label>
+          {/* Registration Form */}
+          <form
+            onSubmit={handleSubmit(onSubmit, onInvalid)}
+            className="space-y-5"
+          >
 
-          <input
-            type="password"
-            placeholder="Enter your password"
-            {...register("password")}
-          />
+            {/* Name */}
+            <div className="space-y-2">
+              <Label htmlFor="name">
+                Name
+              </Label>
 
-          {errors.password && <p>{errors.password.message}</p>}
+              <Input
+                id="name"
+                type="text"
+                placeholder="Enter your name"
+                {...registerField("name")}
+              />
 
-          <div>
-            <label>Confirm Password</label>
+              {errors.name && (
+                <p className="text-sm text-red-500">
+                  {errors.name.message}
+                </p>
+              )}
+            </div>
 
-            <input
-              type="password"
-              placeholder="Confirm your password"
-              {...register("confirmPassword")}
-            />
+            {/* Email */}
+            <div className="space-y-2">
+              <Label htmlFor="email">
+                Email
+              </Label>
 
-            {errors.confirmPassword && (
-              <p>{errors.confirmPassword.message}</p>
+              <Input
+                id="email"
+                type="email"
+                placeholder="Enter your email"
+                {...registerField("email")}
+              />
+
+              {errors.email && (
+                <p className="text-sm text-red-500">
+                  {errors.email.message}
+                </p>
+              )}
+            </div>
+
+            {/* Password */}
+            <div className="space-y-2">
+              <Label htmlFor="password">
+                Password
+              </Label>
+
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Enter your password"
+                  className="pr-10"
+                  {...registerField("password")}
+                />
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowPassword(!showPassword)
+                  }
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700"
+                  aria-label={
+                    showPassword
+                      ? "Hide password"
+                      : "Show password"
+                  }
+                >
+                  {showPassword ? (
+                    <EyeOff size={18} />
+                  ) : (
+                    <Eye size={18} />
+                  )}
+                </button>
+              </div>
+
+              {errors.password && (
+                <p className="text-sm text-red-500">
+                  {errors.password.message}
+                </p>
+              )}
+            </div>
+
+            {/* Confirm Password */}
+            <div className="space-y-2">
+              <Label htmlFor="confirmPassword">
+                Confirm Password
+              </Label>
+
+              <div className="relative">
+                <Input
+                  id="confirmPassword"
+                  type={
+                    showConfirmPassword
+                      ? "text"
+                      : "password"
+                  }
+                  placeholder="Confirm your password"
+                  className="pr-10"
+                  {...registerField("confirmPassword")}
+                />
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowConfirmPassword(
+                      !showConfirmPassword
+                    )
+                  }
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700"
+                  aria-label={
+                    showConfirmPassword
+                      ? "Hide confirm password"
+                      : "Show confirm password"
+                  }
+                >
+                  {showConfirmPassword ? (
+                    <EyeOff size={18} />
+                  ) : (
+                    <Eye size={18} />
+                  )}
+                </button>
+              </div>
+
+              {errors.confirmPassword && (
+                <p className="text-sm text-red-500">
+                  {errors.confirmPassword.message}
+                </p>
+              )}
+            </div>
+
+            {/* Backend Error */}
+            {errorMessage && (
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2">
+                <p className="text-sm text-red-600">
+                  {errorMessage}
+                </p>
+              </div>
             )}
-          </div>
 
-          <div>
-            <button type="submit">Create Account</button>
+            {/* Register Button */}
+            <Button
+              type="submit"
+              disabled={isLoading}
+              className="w-full"
+            >
+              {isLoading
+                ? "Creating Account..."
+                : "Create Account"}
+            </Button>
+          </form>
+
+          {/* Login Link */}
+          <div className="mt-6 text-center text-sm text-slate-500">
+            Already have an account?{" "}
+
+            <button
+              type="button"
+              onClick={() => navigate("/login")}
+              className="font-medium text-slate-900 hover:underline"
+            >
+              Login
+            </button>
           </div>
         </div>
-      </form>
+
+        {/* Footer */}
+        <p className="mt-6 text-center text-xs text-slate-400">
+          By creating an account, you agree to our terms and
+          policies.
+        </p>
+      </div>
     </div>
   );
 }
-
-export default Register;
