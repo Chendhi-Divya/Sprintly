@@ -87,7 +87,11 @@ export default function Register() {
       console.log("Registration successful:", response);
 
       //After successful registration, move to the email verification page.
-      navigate("/verify-email");
+      navigate("/verify-email",{
+        state: {
+          email:data.email,
+        },
+      });
     } catch (error: any) {
       //If registration fails, show the error in the console.
       console.error("Registration error:", error);
@@ -286,6 +290,7 @@ export default function Register() {
               disabled={isLoading}
               className="w-full"
             >
+
               {isLoading
                 ? "Creating Account..."
                 : "Create Account"}

@@ -1,100 +1,215 @@
 import { useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
-
 import {
-  useVerifyEmailMutation,
-  useResendOTPMutation,
-} from "../services/authApi";
+  useNavigate,
+  useLocation,
+} from "react-router-dom";
 
-function VerifyEmail() {
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+import { zodResolver } from "@hookform/resolvers/zod";
 
-  //Used to move to another page.
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
+import { useVerifyEmailMutation } from "../services/authApi";
+
+
+const verifyEmailSchema = z.object({
+  otp: z
+    .string()
+    .length(6, "OTP must be 6 digits")
+    .regex(
+      /^\d+$/,
+      "OTP must contain only numbers"
+    ),
+});
+
+
+type VerifyEmailFormData =
+  z.infer<typeof verifyEmailSchema>;
+
+
+export default function VerifyEmail() {
+
+  const [errorMessage, setErrorMessage] =
+    useState("");
+
   const navigate = useNavigate();
 
-  //Used to get the email sent from the Register page.
   const location = useLocation();
 
-  //Get the email from navigation state.
+
+  // Get email from Register page
   const email = location.state?.email;
 
-  //Store the OTP entered by the user.
-  const [otp, setOtp] = useState("");
 
-  //Connect this page to the verify email API.
-  const [verifyEmail, { isLoading }] = useVerifyEmailMutation();
+  const [verifyEmail, { isLoading }] =
+    useVerifyEmailMutation();
 
-  //Connect this page to the resend OTP API.
-  const [resendOTP] = useResendOTPMutation();
 
-  const handleVerify = async () => {
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<VerifyEmailFormData>({
+    resolver: zodResolver(verifyEmailSchema),
+  });
+
+
+  const onSubmit = async (
+    data: VerifyEmailFormData
+  ) => {
+
+    setErrorMessage("");
+
+
+    // Check if email exists
+    if (!email) {
+
+      setErrorMessage(
+        "Email information is missing. Please register again."
+      );
+
+      return;
+    }
+
 
     try {
 
-      //Send email and OTP to backend.
-      const result = await verifyEmail({
+      const response = await verifyEmail({
         email: email,
-        otp: otp,
+        otp: data.otp,
       }).unwrap();
 
-      console.log(result);
 
-      //After successful verification, go to login page.
-      navigate("/login");
+      console.log(
+        "Email verification successful:",
+        response
+      );
 
-    } catch (error) {
 
-      console.log(error);
+      // After successful verification
+      navigate("/dashboard");
+
+
+    } catch (error: any) {
+
+      console.error(
+        "OTP verification failed:",
+        error
+      );
+
+
+      setErrorMessage(
+        error?.data?.message ||
+        "Invalid or expired OTP"
+      );
     }
   };
 
-  const handleResendOTP = async () => {
-
-    try {
-
-      //Request a new OTP from the backend.
-      const result = await resendOTP({
-        email: email,
-      }).unwrap();
-
-      console.log(result);
-
-    } catch (error) {
-
-      console.log(error);
-    }
-  };
 
   return (
-    <div>
+    <div className="min-h-screen flex items-center justify-center">
 
-      <h1>Verify Email</h1>
+      <div className="w-full max-w-md p-6">
 
-      <p>
-        Enter the OTP sent to {email}
-      </p>
 
-      <input
-        type="text"
-        placeholder="Enter OTP"
-        value={otp}
-        onChange={(e) => setOtp(e.target.value)}
-      />
+        {/* Heading */}
 
-      <button
-        onClick={handleVerify}
-        disabled={isLoading}
-      >
-        {isLoading ? "Verifying..." : "Verify Email"}
-      </button>
+        <h1 className="text-2xl font-bold text-center">
+          Verify Your Email
+        </h1>
 
-      <br />
 
-      <button onClick={handleResendOTP}>
-        Resend OTP
-      </button>
+        {/* Description */}
+
+        <p className="text-center text-gray-500 mt-2">
+          Enter the 6-digit OTP sent to your email
+        </p>
+
+
+        {/* Display Email */}
+
+        {email && (
+          <p className="text-center text-sm mt-2">
+
+            OTP sent to{" "}
+
+            <span className="font-medium">
+              {email}
+            </span>
+
+          </p>
+        )}
+
+
+        {/* Form */}
+
+        <form
+          onSubmit={handleSubmit(onSubmit)}
+          className="space-y-5 mt-6"
+        >
+
+
+          {/* OTP */}
+
+          <div className="space-y-2">
+
+            <Label htmlFor="otp">
+              OTP
+            </Label>
+
+
+            <Input
+              id="otp"
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              placeholder="Enter 6-digit OTP"
+              {...register("otp")}
+            />
+
+
+            {/* OTP Error */}
+
+            {errors.otp && (
+              <p className="text-sm text-red-500">
+                {errors.otp.message}
+              </p>
+            )}
+
+          </div>
+
+
+          {/* Backend Error */}
+
+          {errorMessage && (
+            <p className="text-sm text-red-500 text-center">
+              {errorMessage}
+            </p>
+          )}
+
+
+          {/* Verify Button */}
+
+          <Button
+            type="submit"
+            className="w-full"
+            disabled={isLoading}
+          >
+
+            {isLoading
+              ? "Verifying..."
+              : "Verify Email"}
+
+          </Button>
+
+
+        </form>
+
+      </div>
 
     </div>
   );
 }
-
-export default VerifyEmail;

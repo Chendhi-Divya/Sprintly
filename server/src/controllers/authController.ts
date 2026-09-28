@@ -17,6 +17,112 @@ import { generateToken } from "../utils/generateToken.js";
 import PendingUser from "../models/PendingUser.js";
 
 
+export const forgotPassword = async (req: any, res: any) => {
+  try {
+    const { email } = req.body;
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    const otp = generateOTP();
+
+    const otpExpiresAt = new Date(
+      Date.now() + 10 * 60 * 1000
+    );
+
+    await PendingUser.findOneAndUpdate(
+      { email },
+      {
+        email,
+        otp,
+        otpExpiresAt,
+      },
+      {
+        upsert: true,
+      }
+    );
+
+    await sendOTPEmail(email, otp);
+
+    res.status(200).json({
+      message: "OTP sent to your email",
+    });
+
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      message: "Something went wrong",
+    });
+  }
+};
+
+export const resetPassword = async (req: any, res: any) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+
+    const pendingUser = await PendingUser.findOne({
+      email,
+    });
+
+    if (!pendingUser) {
+      return res.status(400).json({
+        message: "OTP not found",
+      });
+    }
+
+    if (pendingUser.otp !== otp) {
+      return res.status(400).json({
+        message: "Invalid OTP",
+      });
+    }
+
+    if (
+      pendingUser.otpExpiresAt &&
+      pendingUser.otpExpiresAt < new Date()
+    ) {
+      return res.status(400).json({
+        message: "OTP expired",
+      });
+    }
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(
+      newPassword,
+      10
+    );
+
+    user.password = hashedPassword;
+
+    await user.save();
+
+    await PendingUser.deleteOne({ email });
+
+    res.status(200).json({
+      message: "Password reset successfully",
+    });
+
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      message: "Something went wrong",
+    });
+  }
+};
+
 export const registerUser = async (
   req: Request,
   res: Response

@@ -1,38 +1,45 @@
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-
 import { useNavigate } from "react-router-dom";
 import { useDispatch } from "react-redux";
+import { setCredentials } from "../store/authSlice";
+
+import { Button } from "../components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
+import { Eye, EyeOff } from "lucide-react";
 
 import { useLoginMutation } from "../services/authApi";
-import { login } from "../store/authSlice";
 
-//Validation rules for login form.
+
 const loginSchema = z.object({
   email: z
     .string()
     .min(1, "Email is required")
-    .pipe(z.email("Enter a valid email")),
+    .email("Please enter a valid email"),
 
   password: z
     .string()
-    .min(1, "Password is required"),
+    .min(1, "Password is required")
+    .min(8, "Password must be at least 8 characters"),
 });
 
-//Create TypeScript type from Zod schema.
+
 type LoginFormData = z.infer<typeof loginSchema>;
 
-function Login() {
 
-  //Used to navigate to dashboard.
+export default function Login() {
+  const [showPassword, setShowPassword] = useState(false);
+
+  const [errorMessage, setErrorMessage] = useState("");
+
   const navigate = useNavigate();
 
-  //Used to update Redux.
-  const dispatch = useDispatch();
-
-  //Connect Login page to login API.
   const [loginUser, { isLoading }] = useLoginMutation();
+  const dispatch = useDispatch();
 
   const {
     register,
@@ -42,75 +49,171 @@ function Login() {
     resolver: zodResolver(loginSchema),
   });
 
+
   const onSubmit = async (data: LoginFormData) => {
+    setErrorMessage("");
 
     try {
+      const response = await loginUser({
+        email: data.email,
+        password: data.password,
+      }).unwrap();
 
-      //Send email and password to backend.
-      const result = await loginUser(data).unwrap();
-
-      console.log(result);
-
-      //Store token and user information in Redux.
+      console.log("Login successful:", response);
       dispatch(
-        login({
-          token: result.token,
-          user: result.user,
-        })
+        setCredentials({
+            token: response.token,
+            user: response.user,
+  })
+);
+
+navigate("/dashboard");
+
+    } catch (error: any) {
+      console.error("Login failed:", error);
+
+      setErrorMessage(
+        error?.data?.message || "Invalid email or password"
       );
-
-      //Go to dashboard after successful login.
-      navigate("/dashboard");
-
-    } catch (error) {
-
-      console.log(error);
     }
   };
 
+
   return (
-    <div>
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="w-full max-w-md p-6">
 
-      <h1>Login</h1>
+        <h1 className="text-2xl font-bold text-center">
+          Login
+        </h1>
 
-      <form onSubmit={handleSubmit(onSubmit)}>
+        <p className="text-center text-gray-500 mt-2">
+          Login to your Sprintly account
+        </p>
 
-        <div>
-          <label>Email</label>
 
-          <input
-            type="email"
-            placeholder="Enter your email"
-            {...register("email")}
-          />
+        <form
+          onSubmit={handleSubmit(onSubmit)}
+          className="space-y-5 mt-6"
+        >
 
-          {errors.email && (
-            <p>{errors.email.message}</p>
+          {/* Email */}
+          <div className="space-y-2">
+
+            <Label htmlFor="email">
+              Email
+            </Label>
+
+            <Input
+              id="email"
+              type="email"
+              placeholder="Enter your email"
+              {...register("email")}
+            />
+
+            {errors.email && (
+              <p className="text-sm text-red-500">
+                {errors.email.message}
+              </p>
+            )}
+
+          </div>
+
+
+          {/* Password */}
+          <div className="space-y-2">
+
+            <Label htmlFor="password">
+              Password
+            </Label>
+
+            <div className="relative">
+
+              <Input
+                id="password"
+                type={showPassword ? "text" : "password"}
+                placeholder="Enter your password"
+                className="pr-10"
+                {...register("password")}
+              />
+
+              <button
+                type="button"
+                onClick={() =>
+                  setShowPassword(!showPassword)
+                }
+                className="absolute right-3 top-1/2 -translate-y-1/2"
+              >
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </button>
+
+            </div>
+
+            {errors.password && (
+              <p className="text-sm text-red-500">
+                {errors.password.message}
+              </p>
+            )}
+
+          </div>
+
+
+          {/* Forgot Password */}
+          <div className="text-right">
+
+            <button
+              type="button"
+              onClick={() =>
+                navigate("/forgot-password")
+              }
+              className="text-sm underline"
+            >
+              Forgot password?
+            </button>
+
+          </div>
+
+
+          {/* Backend Error */}
+          {errorMessage && (
+            <p className="text-sm text-red-500 text-center">
+              {errorMessage}
+            </p>
           )}
-        </div>
 
-        <div>
-          <label>Password</label>
 
-          <input
-            type="password"
-            placeholder="Enter your password"
-            {...register("password")}
-          />
+          {/* Login Button */}
+          <Button
+            type="submit"
+            className="w-full"
+            disabled={isLoading}
+          >
+            {isLoading ? "Logging in..." : "Login"}
+          </Button>
 
-          {errors.password && (
-            <p>{errors.password.message}</p>
-          )}
-        </div>
 
-        <button type="submit" disabled={isLoading}>
-          {isLoading ? "Logging in..." : "Login"}
-        </button>
+          {/* Register Link */}
+          <p className="text-center text-sm text-gray-500">
 
-      </form>
+            Don't have an account?{" "}
 
+            <button
+              type="button"
+              onClick={() => navigate("/register")}
+              className="underline text-black"
+            >
+              Register
+            </button>
+
+          </p>
+
+        </form>
+
+      </div>
     </div>
   );
 }
-
-export default Login;
