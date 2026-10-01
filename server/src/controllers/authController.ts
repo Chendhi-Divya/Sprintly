@@ -62,66 +62,7 @@ export const forgotPassword = async (req: any, res: any) => {
   }
 };
 
-export const resetPassword = async (req: any, res: any) => {
-  try {
-    const { email, otp, newPassword } = req.body;
 
-    const pendingUser = await PendingUser.findOne({
-      email,
-    });
-
-    if (!pendingUser) {
-      return res.status(400).json({
-        message: "OTP not found",
-      });
-    }
-
-    if (pendingUser.otp !== otp) {
-      return res.status(400).json({
-        message: "Invalid OTP",
-      });
-    }
-
-    if (
-      pendingUser.otpExpiresAt &&
-      pendingUser.otpExpiresAt < new Date()
-    ) {
-      return res.status(400).json({
-        message: "OTP expired",
-      });
-    }
-
-    const user = await User.findOne({ email });
-
-    if (!user) {
-      return res.status(404).json({
-        message: "User not found",
-      });
-    }
-
-    const hashedPassword = await bcrypt.hash(
-      newPassword,
-      10
-    );
-
-    user.password = hashedPassword;
-
-    await user.save();
-
-    await PendingUser.deleteOne({ email });
-
-    res.status(200).json({
-      message: "Password reset successfully",
-    });
-
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      message: "Something went wrong",
-    });
-  }
-};
 
 export const registerUser = async (
   req: Request,
@@ -129,14 +70,24 @@ export const registerUser = async (
 ) => {
   try {
     const result = registerSchema.safeParse(req.body);
-
     if (!result.success) {
-      return res.status(400).json({
-        message: "Validation failed",
-        errors: result.error.flatten(),
-      });
-    }
+      const fieldErrors: Record<string, string[]> = {};
 
+      for (const issue of result.error.issues) {
+        const field = issue.path[0] as string;
+
+        if (!fieldErrors[field]) {
+          fieldErrors[field] = [];
+      }
+
+    fieldErrors[field].push(issue.message);
+  }
+
+  return res.status(400).json({
+    message: "Please correct the following errors",
+    fieldErrors,
+  });
+}
     const {
       name,
       email,
@@ -376,3 +327,53 @@ export const resendOTP = async (
     }
   };
   
+
+  export const resetPassword = async (
+  req: Request,
+  res: Response
+) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+
+    const pendingUser = await PendingUser.findOne({ email });
+
+    if (!pendingUser) {
+      return res.status(404).json({
+        message: "No password reset request found.",
+      });
+    }
+
+    if (pendingUser.otp !== otp) {
+      return res.status(400).json({
+        message: "Invalid OTP.",
+      });
+    }
+
+    if (pendingUser.otpExpiresAt < new Date()) {
+      await PendingUser.findOneAndDelete({ email });
+
+      return res.status(400).json({
+        message: "OTP has expired. Please request a new OTP.",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    await User.findOneAndUpdate(
+      { email },
+      { password: hashedPassword }
+    );
+
+    await PendingUser.findOneAndDelete({ email });
+
+    return res.status(200).json({
+      message: "Password reset successfully.",
+    });
+  } catch (error) {
+    console.log("Reset password error:", error);
+
+    return res.status(500).json({
+      message: "Server error",
+    });
+  }
+};

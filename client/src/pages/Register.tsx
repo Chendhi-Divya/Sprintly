@@ -15,31 +15,42 @@ import { Eye, EyeOff } from "lucide-react";
 //Think of a schema as a set of rules for your registration form.
 const registerSchema = z
   .object({
-    //Name must be a string and cannot be empty.
-    name: z.string().min(1, { message: "Name is required" }),
+    name: z
+      .string()
+      .min(2, "Name must be at least 2 characters"),
 
-    //Email must be a string and must have a valid email format.
     email: z
       .string()
       .min(1, "Email is required")
-      .pipe(z.email("Enter a valid email")),
+      .email("Please enter a valid email address"),
 
-    //Password must be a string and must contain at least 8 characters.
     password: z
       .string()
-      .min(8, "Password must be at least 8 characters long"),
+      .min(8, "Password must be at least 8 characters")
+      .regex(
+        /[A-Z]/,
+        "Password must contain at least one uppercase letter"
+      )
+      .regex(
+        /[0-9]/,
+        "Password must contain at least one number"
+      )
+      .regex(
+        /[^A-Za-z0-9]/,
+        "Password must contain at least one special character"
+      ),
 
-    //Confirm password must not be empty.
     confirmPassword: z
       .string()
-      .min(1, "Please confirm your password"),
+      .min(1, "Confirm password is required"),
   })
-
-  //This checks whether password and confirmPassword have the same value.
-  .refine((data) => data.password === data.confirmPassword, {
-    message: "Passwords do not match",
-    path: ["confirmPassword"],
-  });
+  .refine(
+    (data) => data.password === data.confirmPassword,
+    {
+      message: "Passwords do not match",
+      path: ["confirmPassword"],
+    }
+  );
 
 //This tells TypeScript what data our registration form contains.
 type RegisterFormData = z.infer<typeof registerSchema>;
@@ -58,14 +69,13 @@ export default function Register() {
   const [errorMessage, setErrorMessage] = useState("");
 
   const {
-    register: registerField,
-    handleSubmit,
-    formState: { errors },
-  } = useForm<RegisterFormData>({
-    //this connects the Zod schema to React Hook Form.
-    //It will validate the form data against the schema when the form is submitted.
-    resolver: zodResolver(registerSchema),
-  });
+  register: registerField,
+  handleSubmit,
+  formState: { errors },
+  setError,
+} = useForm<RegisterFormData>({
+  resolver: zodResolver(registerSchema),
+});
 
   //This function runs after the form is successfully submitted through handleSubmit.
   const onSubmit = async (data: RegisterFormData) => {
@@ -87,21 +97,37 @@ export default function Register() {
       console.log("Registration successful:", response);
 
       //After successful registration, move to the email verification page.
-      navigate("/verify-email",{
+      navigate("/verify-email", {
         state: {
-          email:data.email,
+          email: data.email,
         },
       });
-    } catch (error: any) {
-      //If registration fails, show the error in the console.
-      console.error("Registration error:", error);
+  } catch (error: any) {
+  console.log(
+    "Registration error:",
+    JSON.stringify(error, null, 2)
+  );
 
-      //Show backend error message on the page.
-      setErrorMessage(
-        error?.data?.message ||
-          "Registration failed. Please try again."
-      );
-    }
+  console.log("Error data:", error?.data);
+
+  if (error?.data?.fieldErrors) {
+    const fieldErrors = error.data.fieldErrors;
+
+    Object.keys(fieldErrors).forEach((field) => {
+      setError(field as keyof RegisterFormData, {
+        type: "server",
+        message: fieldErrors[field][0],
+      });
+    });
+
+    return;
+  }
+
+  setErrorMessage(
+    error?.data?.message ||
+      "Registration failed. Please try again."
+  );
+}
   };
 
   //This function runs if Zod validation fails.
