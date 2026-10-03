@@ -12,7 +12,7 @@ const userSchema = new Schema<IUser>(
     name: {
       type: String,
       required: true,
-      trim: true,   //removes unneccessary whitespace from the beginning and end of the string.
+      trim: true,
     },
 
     email: {
@@ -26,9 +26,10 @@ const userSchema = new Schema<IUser>(
     password: {
       type: String,
       required: true,
+      select: false,
     },
 
-    isVerified: { //mail verified or not
+    isVerified: {
       type: Boolean,
       default: false,
     },

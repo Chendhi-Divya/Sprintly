@@ -2,11 +2,10 @@ import mongoose, { Schema, Document } from "mongoose";
 
 export interface IProject extends Document {
   name: string;
-  description: string;
-  organization: mongoose.Types.ObjectId;
+  description?: string;
+  organization: string;
   owner: mongoose.Types.ObjectId;
   members: mongoose.Types.ObjectId[];
-  createdAt: Date;
 }
 
 const projectSchema = new Schema<IProject>(
@@ -23,8 +22,7 @@ const projectSchema = new Schema<IProject>(
     },
 
     organization: {
-      type: Schema.Types.ObjectId,
-      ref: "Organization",
+      type: String,
       required: true,
     },
 
@@ -43,7 +41,10 @@ const projectSchema = new Schema<IProject>(
   },
   {
     timestamps: true,
+    versionKey: false,
   }
 );
 
-export default mongoose.model<IProject>("Project", projectSchema);
+const Project = mongoose.model<IProject>("Project", projectSchema);
+
+export default Project;
