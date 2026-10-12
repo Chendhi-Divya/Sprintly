@@ -1,3 +1,4 @@
+
 import type { Request, Response } from "express";
 import Task from "../models/task.js";
 import Project from "../models/project.js";
@@ -36,15 +37,29 @@ export const createTask = async (req: Request, res: Response) => {
       });
     }
 
-    const isMember = existingProject.members.some(
-  (memberId) => memberId.toString() === userId
-);
+    // Check if the logged-in user is a member of the project
+    const isProjectMember = existingProject.members.some(
+      (memberId) => memberId.toString() === userId
+    );
 
-if (!isMember) {
-  return res.status(403).json({
-    message: "You are not a member of this project",
-  });
-}
+    if (!isProjectMember) {
+      return res.status(403).json({
+        message: "You are not a member of this project",
+      });
+    }
+
+    // Check if the assignee is a member of the project
+    if (assignee) {
+      const isAssigneeMember = existingProject.members.some(
+        (memberId) => memberId.toString() === assignee
+      );
+
+      if (!isAssigneeMember) {
+        return res.status(403).json({
+          message: "Assignee must be a member of the project",
+        });
+      }
+    }
 
     const task = await Task.create({
       title,
@@ -72,6 +87,7 @@ if (!isMember) {
   }
 };
 
+// GET TASKS WITH FILTERING
 export const getTasks = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).userId;
@@ -82,18 +98,46 @@ export const getTasks = async (req: Request, res: Response) => {
       });
     }
 
-    const tasks = await Task.find({
+    // Read filter values from query parameters
+    const { status, priority, assignee, type } = req.query;
+
+    // Show tasks reported by or assigned to the logged-in user
+    const filter: any = {
       $or: [
         { reporter: userId },
         { assignee: userId },
       ],
-    })
-    .populate("project")
-    .populate("assignee")
-    .populate("reporter");
+    };
+
+    // Filter by status
+    if (typeof status === "string" && status.trim() !== "") {
+      filter.status = status;
+    }
+
+    // Filter by priority
+    if (typeof priority === "string" && priority.trim() !== "") {
+      filter.priority = priority;
+    }
+
+    // Filter by assignee's MongoDB ObjectId
+    if (typeof assignee === "string" && assignee.trim() !== "") {
+      filter.assignee = assignee;
+    }
+
+    // Filter by task type
+    if (typeof type === "string" && type.trim() !== "") {
+      filter.type = type;
+    }
+
+    // Fetch tasks matching all supplied filters
+    const tasks = await Task.find(filter)
+      .populate("project")
+      .populate("assignee", "name email")
+      .populate("reporter", "name email");
 
     return res.status(200).json({
       message: "Tasks fetched successfully",
+      count: tasks.length,
       tasks,
     });
   } catch (error) {
@@ -111,9 +155,9 @@ export const getTaskById = async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const task = await Task.findById(id)
-    .populate("project")
-    .populate("assignee")
-    .populate("reporter");
+      .populate("project")
+      .populate("assignee", "name email")
+      .populate("reporter", "name email");
 
     if (!task) {
       return res.status(404).json({
@@ -155,6 +199,28 @@ export const updateTask = async (req: Request, res: Response) => {
       return res.status(404).json({
         message: "Task not found",
       });
+    }
+
+    // Find the project that this task belongs to
+    const existingProject = await Project.findById(task.project);
+
+    if (!existingProject) {
+      return res.status(404).json({
+        message: "Project not found",
+      });
+    }
+
+    // Check if the new assignee is a member of the project
+    if (assignee !== undefined) {
+      const isAssigneeMember = existingProject.members.some(
+        (memberId) => memberId.toString() === assignee
+      );
+
+      if (!isAssigneeMember) {
+        return res.status(403).json({
+          message: "Assignee must be a member of the project",
+        });
+      }
     }
 
     if (title !== undefined) {

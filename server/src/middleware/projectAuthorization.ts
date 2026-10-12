@@ -2,14 +2,8 @@ import type { Request, Response, NextFunction } from "express";
 import Project from "../models/project.js";
 import Task from "../models/task.js";
 
-type AuthenticatedRequest = Request & {
-  user?: {
-    id?: string;
-  };
-};
-
 export const checkProjectMember = async (
-  req: AuthenticatedRequest,
+  req: Request,
   res: Response,
   next: NextFunction
 ) => {
@@ -30,7 +24,7 @@ export const checkProjectMember = async (
       });
     }
 
-    const userId = req.user?.id;
+    const userId = (req as any).userId;
 
     const isMember = project.members.some(
       (member) => member.toString() === userId
@@ -51,9 +45,8 @@ export const checkProjectMember = async (
   }
 };
 
-
 export const checkTaskProjectMember = async (
-  req: AuthenticatedRequest,
+  req: Request,
   res: Response,
   next: NextFunction
 ) => {
@@ -74,7 +67,7 @@ export const checkTaskProjectMember = async (
       });
     }
 
-    const userId = req.user?.id;
+    const userId = (req as any).userId;
 
     const isMember = project.members.some(
       (member) => member.toString() === userId
