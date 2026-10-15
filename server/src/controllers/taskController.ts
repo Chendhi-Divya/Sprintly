@@ -88,6 +88,7 @@ export const createTask = async (req: Request, res: Response) => {
 };
 
 // GET TASKS WITH FILTERING
+
 export const getTasks = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).userId;
@@ -98,8 +99,30 @@ export const getTasks = async (req: Request, res: Response) => {
       });
     }
 
-    // Read filter values from query parameters
-    const { status, priority, assignee, type } = req.query;
+    // Get search and filter values
+    const { search, status, priority, assignee, type } = req.query;
+
+    // Get pagination values
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 20;
+
+    // Validate pagination values
+    if (
+      !Number.isInteger(page) ||
+      page < 1 ||
+      !Number.isInteger(limit) ||
+      limit < 1
+    ) {
+      return res.status(400).json({
+        message: "Page and limit must be positive integers",
+      });
+    }
+
+    // Maximum 100 tasks per page
+    const pageLimit = Math.min(limit, 100);
+
+    // Calculate how many tasks to skip
+    const skip = (page - 1) * pageLimit;
 
     // Show tasks reported by or assigned to the logged-in user
     const filter: any = {
@@ -108,6 +131,14 @@ export const getTasks = async (req: Request, res: Response) => {
         { assignee: userId },
       ],
     };
+
+    // Search by title
+    if (typeof search === "string" && search.trim() !== "") {
+      filter.title = {
+        $regex: search.trim(),
+        $options: "i",
+      };
+    }
 
     // Filter by status
     if (typeof status === "string" && status.trim() !== "") {
@@ -119,25 +150,41 @@ export const getTasks = async (req: Request, res: Response) => {
       filter.priority = priority;
     }
 
-    // Filter by assignee's MongoDB ObjectId
+    // Filter by assignee
     if (typeof assignee === "string" && assignee.trim() !== "") {
       filter.assignee = assignee;
     }
 
-    // Filter by task type
+    // Filter by type
     if (typeof type === "string" && type.trim() !== "") {
       filter.type = type;
     }
 
-    // Fetch tasks matching all supplied filters
+    // Count all tasks matching the search and filters
+    const totalTasks = await Task.countDocuments(filter);
+
+    // Fetch only the requested page
     const tasks = await Task.find(filter)
       .populate("project")
       .populate("assignee", "name email")
-      .populate("reporter", "name email");
+      .populate("reporter", "name email")
+      .sort({ createdAt: -1, _id: -1 })
+      .skip(skip)
+      .limit(pageLimit);
+
+    const totalPages = Math.ceil(totalTasks / pageLimit);
 
     return res.status(200).json({
       message: "Tasks fetched successfully",
       count: tasks.length,
+      pagination: {
+        totalTasks,
+        currentPage: page,
+        limit: pageLimit,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPreviousPage: page > 1,
+      },
       tasks,
     });
   } catch (error) {
@@ -149,6 +196,8 @@ export const getTasks = async (req: Request, res: Response) => {
     });
   }
 };
+
+
 
 export const getTaskById = async (req: Request, res: Response) => {
   try {
