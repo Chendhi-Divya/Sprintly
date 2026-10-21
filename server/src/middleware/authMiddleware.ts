@@ -7,15 +7,16 @@ const authMiddleware = (
   next: NextFunction
 ) => {
   try {
+    const cookieToken = req.headers.cookie
+      ?.split(";")
+      .map((cookie) => cookie.trim())
+      .find((cookie) => cookie.startsWith("token="))
+      ?.slice("token=".length);
     const authHeader = req.headers.authorization;
-
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({
-        message: "Authorization token is required",
-      });
-    }
-
-    const token = authHeader.slice("Bearer ".length).trim();
+    const bearerToken = authHeader?.startsWith("Bearer ")
+      ? authHeader.slice("Bearer ".length).trim()
+      : undefined;
+    const token = cookieToken ? decodeURIComponent(cookieToken) : bearerToken;
 
     if (!token) {
       return res.status(401).json({

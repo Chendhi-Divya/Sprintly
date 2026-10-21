@@ -1,4 +1,4 @@
-import { response, type Request, type Response } from "express";
+import { type Request, type Response } from "express";
 import bcrypt from "bcryptjs";
 
 import User from "../models/User.js";
@@ -15,6 +15,14 @@ import { generateOTP } from "../utils/generateOTP.js";
 import { sendOTPEmail } from "../services/emailService.js";
 import { generateToken } from "../utils/generateToken.js";
 import PendingUser from "../models/PendingUser.js";
+
+const authCookieOptions = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: (process.env.NODE_ENV === "production" ? "none" : "lax") as const,
+  path: "/",
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+};
 
 
 export const forgotPassword = async (req: any, res: any) => {
@@ -183,12 +191,12 @@ export const verifyEmailOTP = async (
     await PendingUser.findOneAndDelete({email});
 
     const token=generateToken(newUser._id.toString());
+    res.cookie("token", token, authCookieOptions);
 
     return res.status(200).json({
       message: "Email verified and user registered successfully.",
-      token,
       user: {
-        id: newUser._id,
+        id: newUser._id.toString(),
         name: newUser.name,
         email: newUser.email,
       },
@@ -219,7 +227,7 @@ export const loginUser = async (
 
     const { email, password }= result.data;
 
-    const user = await User.findOne({ email }).select("+password");
+    const user=await User.findOne({email});
 
     if(!user){
       return res.status(401).json({
@@ -241,12 +249,12 @@ export const loginUser = async (
     }
 
     const token=generateToken(user._id.toString());
+    res.cookie("token", token, authCookieOptions);
 
     return res.status(200).json({
       message: "Login successful",
-      token,
       user:{
-        id:user._id,
+        id:user._id.toString(),
         name:user.name,
         email:user.email,
       },
@@ -265,6 +273,13 @@ export const logoutUser = async (
   res: Response
 ) => {
   try{
+    res.clearCookie("token", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      path: "/",
+    });
+
     return res.status(200).json({
       message: "User logged out successfully.",
     });
@@ -273,6 +288,30 @@ export const logoutUser = async (
     return res.status(500).json({
       message: "Server error",
     });
+  }
+};
+
+export const getCurrentUser = async (
+  req: Request & { userId?: string },
+  res: Response
+) => {
+  try {
+    const user = await User.findById(req.userId).select("name email");
+
+    if (!user) {
+      return res.status(401).json({ message: "User not found" });
+    }
+
+    return res.status(200).json({
+      user: {
+        id: user._id.toString(),
+        name: user.name,
+        email: user.email,
+      },
+    });
+  } catch (error) {
+    console.error("Current user error:", error);
+    return res.status(500).json({ message: "Server error" });
   }
 };
 

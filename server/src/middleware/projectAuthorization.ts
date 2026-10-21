@@ -22,7 +22,7 @@ export const checkProjectMember = async (
       return res.status(404).json({
         message: "Project not found",
       });
-    }
+    } 
 
     const userId = (req as any).userId;
 
