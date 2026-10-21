@@ -1,12 +1,27 @@
+import { useEffect } from "react";
 import { Navigate, Outlet } from "react-router-dom";
-import { useSelector } from "react-redux";
+import { useDispatch } from "react-redux";
+import { useGetCurrentUserQuery } from "../services/authApi";
+import { logout, setCredentials } from "../store/authSlice";
 
 export default function ProtectedRoute() {
-  const token = useSelector(
-    (state: any) => state.auth.token
-  );
+  const dispatch = useDispatch();
+  const { data, isLoading, isError } = useGetCurrentUserQuery();
+  const user = data?.user;
 
-  if (!token) {
+  useEffect(() => {
+    if (user) {
+      dispatch(setCredentials({ user }));
+    } else if (isError) {
+      dispatch(logout());
+    }
+  }, [dispatch, isError, user]);
+
+  if (isLoading) {
+    return <p className="p-6 text-center">Checking your session…</p>;
+  }
+
+  if (!user) {
     return <Navigate to="/login" />;
   }
 

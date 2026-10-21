@@ -9,6 +9,7 @@ import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 
 import ProtectedRoute from "./routes/ProtectedRoute";
+import Tasks from "./pages/Tasks";
 
 const RegisterPage = Register as unknown as ComponentType;
 
@@ -23,6 +24,7 @@ function App() {
 
       <Route element={<ProtectedRoute />}>
       <Route path="/dashboard" element={<Dashboard />} />
+      <Route path="/tasks" element={<Tasks />} />
       </Route>
     </Routes>
   );

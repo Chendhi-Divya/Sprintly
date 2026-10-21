@@ -1,5 +1,11 @@
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
 
+export interface AuthUser {
+  id: string;
+  name: string;
+  email: string;
+}
+
 export const authApi = createApi({
   //This gives our API service a name.
   reducerPath: "authApi",
@@ -7,6 +13,7 @@ export const authApi = createApi({
   //This is the common URL of our authentication backend.
   baseQuery: fetchBaseQuery({
     baseUrl: "http://localhost:5000/api/auth",
+    credentials: "include",
   }),
 
   endpoints: (builder) => ({
@@ -35,6 +42,19 @@ export const authApi = createApi({
         url: "/login",
         method: "POST",
         body: data,
+      }),
+    }),
+
+    // Restore the current session from the HttpOnly cookie.
+    getCurrentUser: builder.query<{ user: AuthUser }, void>({
+      query: () => "/me",
+    }),
+
+    // Clear the server-side authentication cookie.
+    logout: builder.mutation<{ message: string }, void>({
+      query: () => ({
+        url: "/logout",
+        method: "POST",
       }),
     }),
 
@@ -69,6 +89,8 @@ export const {
   useRegisterMutation,
   useVerifyEmailMutation,
   useLoginMutation,
+  useGetCurrentUserQuery,
+  useLogoutMutation,
   useResendOTPMutation,
   useForgotPasswordMutation,
   useResetPasswordMutation,

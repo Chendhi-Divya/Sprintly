@@ -62,10 +62,9 @@ export default function Login() {
       console.log("Login successful:", response);
       dispatch(
         setCredentials({
-            token: response.token,
-            user: response.user,
-  })
-);
+          user: response.user,
+        })
+      );
 
 navigate("/dashboard");
 
