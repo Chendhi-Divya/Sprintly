@@ -1,3 +1,4 @@
+
 import mongoose, { Schema, Document } from "mongoose";
 
 interface ITask extends Document {
@@ -6,7 +7,7 @@ interface ITask extends Document {
 
   type: "Epic" | "Story" | "Task" | "Bug" | "Sub-task";
 
-  status: "To Do" | "In Progress" | "Done";
+  status: "To Do" | "In Progress" | "In Review" | "Done";
 
   priority: "Low" | "Medium" | "High" | "Urgent";
 
@@ -42,7 +43,7 @@ const taskSchema = new Schema<ITask>(
 
     status: {
       type: String,
-      enum: ["To Do", "In Progress", "Done"],
+      enum: ["To Do", "In Progress", "In Review", "Done"],
       default: "To Do",
     },
 
@@ -85,7 +86,6 @@ const taskSchema = new Schema<ITask>(
   },
   {
     timestamps: true,
-
   }
 );
 

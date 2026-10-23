@@ -9,10 +9,12 @@ interface User {
 }
 
 interface AuthState {
+  token: string | null;
   user: User | null;
 }
 
 const initialState: AuthState = {
+  token: localStorage.getItem("token"),
   user: (() => {
     try {
       const savedUser = localStorage.getItem("user");
@@ -30,16 +32,20 @@ const authSlice = createSlice({
   reducers: {
     setCredentials: (
       state,
-      action: PayloadAction<{ user: User }>
+      action: PayloadAction<{ token: string; user: User }>
     ) => {
+      state.token = action.payload.token;
       state.user = action.payload.user;
 
+      localStorage.setItem("token", action.payload.token);
       localStorage.setItem("user", JSON.stringify(action.payload.user));
     },
 
     logout: (state) => {
+      state.token = null;
       state.user = null;
 
+      localStorage.removeItem("token");
       localStorage.removeItem("user");
     },
   },

@@ -10,6 +10,8 @@ import ResetPassword from "./pages/ResetPassword";
 
 import ProtectedRoute from "./routes/ProtectedRoute";
 import Tasks from "./pages/Tasks";
+import Navbar from "./components/Navbar";
+import WorkspaceLayout from "./pages/WorkspaceLayout";
 
 const RegisterPage = Register as unknown as ComponentType;
 
@@ -19,12 +21,32 @@ function App() {
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/login" element={<Login />} />
       <Route path="/verify-email" element={<VerifyEmail />} />
-      <Route path="/forgot-password" element={<ForgotPassword />} />
-      <Route path="/reset-password" element={<ResetPassword/>}/>
+
+      <Route
+        path="/forgot-password"
+        element={<ForgotPassword />}
+      />
+
+      <Route
+        path="/reset-password"
+        element={<ResetPassword />}
+      />
 
       <Route element={<ProtectedRoute />}>
-      <Route path="/dashboard" element={<Dashboard />} />
-      <Route path="/tasks" element={<Tasks />} />
+        <Route
+          path="/dashboard"
+          element={<WorkspaceLayout />}
+        />
+
+        <Route
+          path="/tasks"
+          element={
+            <>
+              <Navbar selectedProjectId="" />
+              <Tasks />
+            </>
+          }
+        />
       </Route>
     </Routes>
   );

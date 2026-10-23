@@ -73,6 +73,7 @@ export default function VerifyEmail() {
       dispatch(
         setCredentials({
           user: response.user,
+          token: response.token,
         })
       );
 

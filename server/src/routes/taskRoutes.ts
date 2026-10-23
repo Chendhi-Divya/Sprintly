@@ -17,6 +17,7 @@ import {
 
 const router = express.Router();
 
+// Create a new task
 router.post(
   "/",
   protect,
@@ -24,10 +25,21 @@ router.post(
   createTask
 );
 
-router.get("/", protect, getTasks);
+// Get all tasks with filtering and pagination
+router.get(
+  "/",
+  protect,
+  getTasks
+);
 
-router.get("/:id", protect, getTaskById);
+// Get a single task by ID
+router.get(
+  "/:id",
+  protect,
+  getTaskById
+);
 
+// Update a task, including its status
 router.put(
   "/:id",
   protect,
@@ -35,6 +47,7 @@ router.put(
   updateTask
 );
 
+// Delete a task
 router.delete(
   "/:id",
   protect,

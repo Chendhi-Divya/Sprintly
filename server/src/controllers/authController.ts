@@ -16,10 +16,13 @@ import { sendOTPEmail } from "../services/emailService.js";
 import { generateToken } from "../utils/generateToken.js";
 import PendingUser from "../models/PendingUser.js";
 
+const authCookieSameSite: "none" | "lax" =
+  process.env.NODE_ENV === "production" ? "none" : "lax";
+
 const authCookieOptions = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
-  sameSite: (process.env.NODE_ENV === "production" ? "none" : "lax") as const,
+  sameSite: authCookieSameSite,
   path: "/",
   maxAge: 7 * 24 * 60 * 60 * 1000,
 };
@@ -211,61 +214,68 @@ export const verifyEmailOTP = async (
   }
 };
 
+
 export const loginUser = async (
   req: Request,
   res: Response
 ) => {
-  try{
+  try {
     const result = loginSchema.safeParse(req.body);
 
-    if(!result.success){
+    if (!result.success) {
       return res.status(400).json({
         message: "Validation failed",
         errors: result.error.flatten(),
       });
     }
 
-    const { email, password }= result.data;
+    const { email, password } = result.data;
 
-    const user=await User.findOne({email});
+    const user = await User.findOne({ email }).select("+password");
 
-    if(!user){
+    if (!user) {
       return res.status(401).json({
         message: "Invalid email or password",
       });
     }
-    if (!user.isVerified){
+
+    if (!user.isVerified) {
       return res.status(403).json({
         message: "Email not verified. Please verify your email before logging in.",
       });
     }
 
-    const isPasswordCorrect= await bcrypt.compare(password,user.password);
+    const isPasswordCorrect = await bcrypt.compare(
+      password,
+      user.password
+    );
 
-    if(!isPasswordCorrect){
+    if (!isPasswordCorrect) {
       return res.status(401).json({
         message: "Invalid email or password",
       });
     }
 
-    const token=generateToken(user._id.toString());
+    const token = generateToken(user._id.toString());
+
     res.cookie("token", token, authCookieOptions);
 
     return res.status(200).json({
       message: "Login successful",
-      user:{
-        id:user._id.toString(),
-        name:user.name,
-        email:user.email,
+      user: {
+        id: user._id.toString(),
+        name: user.name,
+        email: user.email,
       },
     });
-  } catch(error){
-    console.log("Login error:",error);
+  } catch (error) {
+    console.error("Login error:", error);
+
     return res.status(500).json({
       message: "Server error",
     });
   }
-}
+};
 
 export const logoutUser = async (
   
@@ -276,7 +286,7 @@ export const logoutUser = async (
     res.clearCookie("token", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      sameSite: authCookieSameSite,
       path: "/",
     });
 
