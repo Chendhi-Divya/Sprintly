@@ -215,3 +215,53 @@ export const addProjectMember = async (
     });
   }
 };
+
+export const getProjectMembers = async (
+  req: Request,
+  res: Response
+) => {
+  try {
+    const { id } = req.params;
+    const userId = (req as any).userId;
+
+    if (!userId) {
+      return res.status(401).json({
+        message: "User is not authenticated",
+      });
+    }
+
+    const project = await Project.findById(id);
+
+    if (!project) {
+      return res.status(404).json({
+        message: "Project not found",
+      });
+    }
+
+    // Only project members can view the member list
+    const isMember = project.members.some(
+      (member) => member.toString() === userId
+    );
+
+    if (!isMember) {
+      return res.status(403).json({
+        message: "You are not a member of this project",
+      });
+    }
+
+    const members = await User.find({
+      _id: { $in: project.members },
+    }).select("_id name email");
+
+    return res.status(200).json({
+      message: "Project members fetched successfully",
+      members,
+    });
+  } catch (error) {
+    console.error("GET PROJECT MEMBERS ERROR:", error);
+
+    return res.status(500).json({
+      message: "Failed to fetch project members",
+    });
+  }
+};

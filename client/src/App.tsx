@@ -4,7 +4,6 @@ import type { ComponentType } from "react";
 import Register from "./pages/Register";
 import Login from "./pages/login";
 import VerifyEmail from "./pages/VerifyEmail";
-import Dashboard from "./pages/Dashboard";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 

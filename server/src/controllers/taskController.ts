@@ -2,8 +2,9 @@
 import type { Request, Response } from "express";
 import Task from "../models/task.js";
 import Project from "../models/project.js";
+import TaskCounter from "../models/taskCounter.js";
 
-
+// CREATE TASK
 export const createTask = async (req: Request, res: Response) => {
   try {
     const {
@@ -39,18 +40,18 @@ export const createTask = async (req: Request, res: Response) => {
       });
     }
 
-    // The logged-in user must belong to the project.
-    const isProjectMember = existingProject.members.some(
+    // Check project membership.
+    const isMember = existingProject.members.some(
       (memberId) => memberId.toString() === userId.toString()
     );
 
-    if (!isProjectMember) {
+    if (!isMember) {
       return res.status(403).json({
         message: "You are not a member of this project",
       });
     }
 
-    // An assignee must also be a project member.
+    // Check assignee membership.
     if (assignee) {
       const isAssigneeMember = existingProject.members.some(
         (memberId) => memberId.toString() === assignee.toString()
@@ -63,24 +64,51 @@ export const createTask = async (req: Request, res: Response) => {
       }
     }
 
-    // If a parent task is provided, validate it.
+    // Check parent task.
     if (parentTask) {
-      const existingParent = await Task.findById(parentTask);
+      const parent = await Task.findById(parentTask);
 
-      if (!existingParent) {
+      if (!parent) {
         return res.status(404).json({
           message: "Parent task not found",
         });
       }
 
-      if (existingParent.project.toString() !== project.toString()) {
+      if (parent.project.toString() !== project.toString()) {
         return res.status(400).json({
           message: "Parent task must belong to the same project",
         });
       }
     }
 
+    // Generate a readable task ID.
+    const prefixes: Record<string, string> = {
+      Epic: "EPIC",
+      Story: "STORY",
+      Task: "TASK",
+      Bug: "BUG",
+      "Sub-task": "SUB",
+    };
+
+    const prefix = prefixes[type];
+
+    if (!prefix) {
+      return res.status(400).json({
+        message: "Invalid task type",
+      });
+    }
+
+    const counter = await TaskCounter.findOneAndUpdate(
+      { _id: prefix },
+      { $inc: { seq: 1 } },
+      { new: true, upsert: true }
+    );
+
+    const taskKey = `${prefix}-${String(counter.seq).padStart(3, "0")}`;
+
+    // Save the task.
     const task = await Task.create({
+      taskKey,
       title,
       description,
       type,
@@ -97,7 +125,7 @@ export const createTask = async (req: Request, res: Response) => {
       .populate("project", "name")
       .populate("assignee", "name email")
       .populate("reporter", "name email")
-      .populate("parentTask", "title");
+      .populate("parentTask", "title taskKey");
 
     return res.status(201).json({
       message: "Task created successfully",
@@ -113,9 +141,7 @@ export const createTask = async (req: Request, res: Response) => {
   }
 };
 
-// GET TASKS WITH FILTERING
-
-
+// GET TASKS WITH FILTERING AND PAGINATION
 export const getTasks = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).userId;
@@ -145,32 +171,31 @@ export const getTasks = async (req: Request, res: Response) => {
     const pageLimit = Math.min(limit, 100);
     const skip = (page - 1) * pageLimit;
 
-    // Preserve your existing behavior: show tasks reported by
-    // or assigned to the logged-in user.
+    // Show tasks reported by or assigned to this user.
     const filter: any = {
       $or: [{ reporter: userId }, { assignee: userId }],
     };
 
-    if (typeof search === "string" && search.trim() !== "") {
+    if (typeof search === "string" && search.trim()) {
       filter.title = {
         $regex: search.trim(),
         $options: "i",
       };
     }
 
-    if (typeof status === "string" && status.trim() !== "") {
+    if (typeof status === "string" && status.trim()) {
       filter.status = status;
     }
 
-    if (typeof priority === "string" && priority.trim() !== "") {
+    if (typeof priority === "string" && priority.trim()) {
       filter.priority = priority;
     }
 
-    if (typeof assignee === "string" && assignee.trim() !== "") {
+    if (typeof assignee === "string" && assignee.trim()) {
       filter.assignee = assignee;
     }
 
-    if (typeof type === "string" && type.trim() !== "") {
+    if (typeof type === "string" && type.trim()) {
       filter.type = type;
     }
 
@@ -180,7 +205,7 @@ export const getTasks = async (req: Request, res: Response) => {
       .populate("project", "name")
       .populate("assignee", "name email")
       .populate("reporter", "name email")
-      .populate("parentTask", "title")
+      .populate("parentTask", "title taskKey")
       .sort({ createdAt: -1, _id: -1 })
       .skip(skip)
       .limit(pageLimit);
@@ -210,18 +235,14 @@ export const getTasks = async (req: Request, res: Response) => {
   }
 };
 
-
-
-
+// GET ONE TASK
 export const getTaskById = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
-
-    const task = await Task.findById(id)
+    const task = await Task.findById(req.params.id)
       .populate("project", "name")
       .populate("assignee", "name email")
       .populate("reporter", "name email")
-      .populate("parentTask", "title");
+      .populate("parentTask", "title taskKey");
 
     if (!task) {
       return res.status(404).json({
@@ -243,12 +264,10 @@ export const getTaskById = async (req: Request, res: Response) => {
   }
 };
 
-
-
+// UPDATE TASK
 export const updateTask = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-
     const {
       title,
       description,
@@ -259,7 +278,6 @@ export const updateTask = async (req: Request, res: Response) => {
       dueDate,
     } = req.body;
 
-    // 1. Check authentication
     const userId = (req as any).userId;
 
     if (!userId) {
@@ -268,7 +286,6 @@ export const updateTask = async (req: Request, res: Response) => {
       });
     }
 
-    // 2. Find the task
     const task = await Task.findById(id);
 
     if (!task) {
@@ -277,52 +294,52 @@ export const updateTask = async (req: Request, res: Response) => {
       });
     }
 
-    // 3. Find the project associated with the task
-    const existingProject = await Project.findById(task.project);
+    const project = await Project.findById(task.project);
 
-    if (!existingProject) {
+    if (!project) {
       return res.status(404).json({
         message: "Project not found",
       });
     }
 
-    // 4. Check whether the logged-in user belongs to this project
-    const isProjectMember = existingProject.members.some(
+    const isMember = project.members.some(
       (memberId) => memberId.toString() === userId.toString()
     );
 
-    if (!isProjectMember) {
+    if (!isMember) {
       return res.status(403).json({
         message: "You are not a member of this project",
       });
     }
 
-    // 5. Validate status
     const allowedStatuses = [
       "To Do",
       "In Progress",
       "In Review",
       "Done",
-    ] as const;
+    ];
 
-    if (
-      status !== undefined &&
-      !allowedStatuses.includes(status)
-    ) {
-      return res.status(400).json({
-        message: "Invalid task status",
-        allowedStatuses,
-      });
-    }
-
-    // 6. Validate task type
     const allowedTypes = [
       "Epic",
       "Story",
       "Task",
       "Bug",
       "Sub-task",
-    ] as const;
+    ];
+
+    const allowedPriorities = [
+      "Low",
+      "Medium",
+      "High",
+      "Urgent",
+    ];
+
+    if (status !== undefined && !allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        message: "Invalid task status",
+        allowedStatuses,
+      });
+    }
 
     if (type !== undefined && !allowedTypes.includes(type)) {
       return res.status(400).json({
@@ -330,14 +347,6 @@ export const updateTask = async (req: Request, res: Response) => {
         allowedTypes,
       });
     }
-
-    // 7. Validate priority
-    const allowedPriorities = [
-      "Low",
-      "Medium",
-      "High",
-      "Urgent",
-    ] as const;
 
     if (
       priority !== undefined &&
@@ -349,9 +358,9 @@ export const updateTask = async (req: Request, res: Response) => {
       });
     }
 
-    // 8. Check whether the new assignee belongs to the project
+    // Validate the new assignee.
     if (assignee !== undefined && assignee !== null && assignee !== "") {
-      const isAssigneeMember = existingProject.members.some(
+      const isAssigneeMember = project.members.some(
         (memberId) => memberId.toString() === assignee.toString()
       );
 
@@ -362,7 +371,6 @@ export const updateTask = async (req: Request, res: Response) => {
       }
     }
 
-    // 9. Update the provided fields only
     if (title !== undefined) task.title = title;
     if (description !== undefined) task.description = description;
     if (type !== undefined) task.type = type;
@@ -370,22 +378,24 @@ export const updateTask = async (req: Request, res: Response) => {
     if (priority !== undefined) task.priority = priority;
 
     if (assignee !== undefined) {
-      task.assignee = assignee || undefined;
+      if (assignee === null || assignee === "") {
+        task.set("assignee", null);
+      } else {
+        task.assignee = assignee;
+      }
     }
 
     if (dueDate !== undefined) {
       task.dueDate = dueDate || undefined;
     }
 
-    // 10. Save changes to MongoDB
     await task.save();
 
-    // 11. Return the updated task
     const updatedTask = await Task.findById(task._id)
-    .populate("project", "name")
-    .populate("assignee", "name email")
-    .populate("reporter", "name email")
-    .populate("parentTask", "title");
+      .populate("project", "name")
+      .populate("assignee", "name email")
+      .populate("reporter", "name email")
+      .populate("parentTask", "title taskKey");
 
     return res.status(200).json({
       message: "Task updated successfully",
@@ -411,11 +421,18 @@ export const updateTask = async (req: Request, res: Response) => {
   }
 };
 
+// DELETE TASK
 export const deleteTask = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    const userId = (req as any).userId;
 
-    const task = await Task.findById(id);
+    if (!userId) {
+      return res.status(401).json({
+        message: "User is not authenticated",
+      });
+    }
+
+    const task = await Task.findById(req.params.id);
 
     if (!task) {
       return res.status(404).json({
@@ -423,7 +440,25 @@ export const deleteTask = async (req: Request, res: Response) => {
       });
     }
 
-    await Task.findByIdAndDelete(id);
+    const project = await Project.findById(task.project);
+
+    if (!project) {
+      return res.status(404).json({
+        message: "Project not found",
+      });
+    }
+
+    const isMember = project.members.some(
+      (memberId) => memberId.toString() === userId.toString()
+    );
+
+    if (!isMember) {
+      return res.status(403).json({
+        message: "You are not a member of this project",
+      });
+    }
+
+    await Task.findByIdAndDelete(task._id);
 
     return res.status(200).json({
       message: "Task deleted successfully",

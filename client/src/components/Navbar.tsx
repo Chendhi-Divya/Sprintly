@@ -14,6 +14,7 @@ import {
   useGetProjectsQuery,
   useGetTasksQuery,
   useCreateTaskMutation,
+  useGetProjectMembersQuery,
 } from "../services/taskApi";
 
 type TaskType = "Epic" | "Story" | "Task" | "Bug";
@@ -30,7 +31,6 @@ type NavbarProps = {
   selectedProjectId?: string;
 };
 
-// Get tasks from the API response.
 function getTasks(response: unknown): Task[] {
   if (Array.isArray(response)) {
     return response as Task[];
@@ -61,7 +61,6 @@ function getTasks(response: unknown): Task[] {
   return [];
 }
 
-// Get the project's ID from a task.
 function getProjectId(task: Task): string {
   if (typeof task.project === "string") {
     return task.project;
@@ -84,7 +83,9 @@ export default function Navbar({
   const [description, setDescription] = useState("");
   const [type, setType] = useState<TaskType>("Task");
   const [priority, setPriority] = useState<TaskPriority>("Medium");
+  const [assignee, setAssignee] = useState("");
   const [parentTask, setParentTask] = useState("");
+  const [dueDate, setDueDate] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
   const {
@@ -108,8 +109,7 @@ export default function Navbar({
   const projects = projectsData?.projects ?? [];
   const tasks = getTasks(tasksData);
 
-  // Use the selected project. If there is only one project,
-  // select it automatically.
+  // Find the project currently selected.
   const projectId =
     selectedProjectId ||
     (projects.length === 1 ? projects[0]._id : "");
@@ -118,7 +118,19 @@ export default function Navbar({
     (project) => project._id === projectId
   );
 
-  // Only show parent tasks from the selected project.
+  // Fetch members of this project.
+  const {
+    data: membersData,
+    isLoading: isLoadingMembers,
+    isError: isMembersError,
+    refetch: refetchMembers,
+  } = useGetProjectMembersQuery(projectId, {
+    skip: !projectId,
+  });
+
+  const members = membersData?.members ?? [];
+
+  // Find existing tasks in this project for the Parent Task dropdown.
   const parentTasks = tasks.filter(
     (task) =>
       task._id &&
@@ -126,9 +138,9 @@ export default function Navbar({
       getProjectId(task) === projectId
   );
 
-  // Clear the parent task when the selected project changes.
   useEffect(() => {
     setParentTask("");
+    setAssignee("");
   }, [projectId]);
 
   function resetForm() {
@@ -136,6 +148,7 @@ export default function Navbar({
     setDescription("");
     setType("Task");
     setPriority("Medium");
+    setAssignee("");
     setParentTask("");
     setErrorMessage("");
   }
@@ -146,6 +159,10 @@ export default function Navbar({
 
     void refetchProjects();
     void refetchTasks();
+
+    if (projectId) {
+      void refetchMembers();
+    }
   }
 
   function handleClose() {
@@ -181,12 +198,19 @@ export default function Navbar({
       return;
     }
 
-    // Parent Task is optional. Validate it only if selected.
     if (
       parentTask &&
       !parentTasks.some((task) => task._id === parentTask)
     ) {
       setErrorMessage("Please select a valid parent task.");
+      return;
+    }
+
+    // Do not submit a selected assignee if members failed to load.
+    if (assignee && !members.some((member) => member._id === assignee)) {
+      setErrorMessage(
+        "The selected assignee is invalid. Please reload the members."
+      );
       return;
     }
 
@@ -197,6 +221,7 @@ export default function Navbar({
         type,
         priority,
         project: projectId,
+        ...(assignee ? { assignee } : {}),
         ...(parentTask ? { parentTask } : {}),
       }).unwrap();
 
@@ -350,7 +375,7 @@ export default function Navbar({
                   htmlFor="task-title"
                   className="mb-1 block text-sm font-medium text-gray-700"
                 >
-                  Task Title *
+                  Task Title 
                 </label>
 
                 <input
@@ -374,9 +399,7 @@ export default function Navbar({
                 <textarea
                   id="task-description"
                   value={description}
-                  onChange={(event) =>
-                    setDescription(event.target.value)
-                  }
+                  onChange={(event) => setDescription(event.target.value)}
                   placeholder="Describe the task"
                   rows={2}
                   className="w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
@@ -429,6 +452,72 @@ export default function Navbar({
                   </select>
                 </div>
               </div>
+            
+{/* Due Date */}
+<div className="space-y-1">
+  <label
+    htmlFor="dueDate"
+    className="text-sm font-medium text-gray-700"
+  >
+    Due Date
+  </label>
+
+  <input
+    id="dueDate"
+    name="dueDate"
+    type="date"
+    value={dueDate}
+    onChange={(event) => setDueDate(event.target.value)}
+    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+  />
+</div>
+
+
+              {/* Assignee dropdown */}
+              <div>
+                <label
+                  htmlFor="task-assignee"
+                  className="mb-1 block text-sm font-medium text-gray-700"
+                >
+                  Assignee
+                </label>
+
+                <select
+                  id="task-assignee"
+                  value={assignee}
+                  onChange={(event) => setAssignee(event.target.value)}
+                  disabled={!projectId || isLoadingMembers || isMembersError}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
+                >
+                  <option value="">
+                    {!projectId
+                      ? "Select a project first"
+                      : isLoadingMembers
+                        ? "Loading members..."
+                        : isMembersError
+                          ? "Could not load members"
+                          : members.length === 0
+                            ? "No members found"
+                            : "Unassigned"}
+                  </option>
+
+                  {members.map((member) => (
+                    <option key={member._id} value={member._id}>
+                      {member.name} ({member.email})
+                    </option>
+                  ))}
+                </select>
+
+                {isMembersError && (
+                  <button
+                    type="button"
+                    onClick={() => void refetchMembers()}
+                    className="mt-1 text-xs font-medium text-blue-600 hover:underline"
+                  >
+                    Retry loading members
+                  </button>
+                )}
+              </div>
 
               <div>
                 <label
@@ -437,7 +526,7 @@ export default function Navbar({
                 >
                   Parent Task{" "}
                   <span className="font-normal text-gray-400">
-                    (Optional)
+                   
                   </span>
                 </label>
 
@@ -461,8 +550,6 @@ export default function Navbar({
                     </option>
                   ))}
                 </select>
-
-               
 
                 {isTasksError && (
                   <button

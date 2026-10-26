@@ -10,6 +10,9 @@ import {
 } from "../controllers/projectController.js";
 
 import protect from "../middleware/authMiddleware.js";
+import {
+  getProjectMembers,
+} from "../controllers/projectController.js";
 
 const router = express.Router();
 
@@ -24,5 +27,7 @@ router.put("/:id", protect, updateProject);
 router.delete("/:id", protect, deleteProject);
 
 router.post("/:id/members", protect, addProjectMember);
+
+router.get("/:id/members", protect, getProjectMembers);
 
 export default router;

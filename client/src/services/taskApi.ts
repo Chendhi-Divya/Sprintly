@@ -1,37 +1,49 @@
+
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
 
-type TaskStatus = "To Do" | "In Progress" | "In Review" | "Done";
-type TaskType = "Epic" | "Story" | "Task" | "Bug" ;
-type TaskPriority = "Low" | "Medium" | "High" ;
 
-interface Task {
+// Task types
+export type TaskStatus = "To Do" | "In Progress" | "In Review" | "Done";
+export type TaskType = "Epic" | "Story" | "Task" | "Bug";
+export type TaskPriority = "Low" | "Medium" | "High";
+
+// User assigned to a task
+export interface TaskUser {
   _id: string;
+  name: string;
+  email: string;
+}
+
+// Project information
+export interface TaskProject {
+  _id: string;
+  name: string;
+}
+
+export interface ParentTask {
+  _id: string;
+  title: string;
+  taskKey?: string;
+}
+
+// Task information
+export interface Task {
+  _id: string;
+  taskKey?: string;
   title: string;
   description?: string;
   type: TaskType;
   status: TaskStatus;
   priority: TaskPriority;
   dueDate?: string;
-
-  assignee?: {
-    _id: string;
-    name: string;
-    email: string;
-  };
-
-  reporter?: {
-    _id: string;
-    name: string;
-    email: string;
-  };
-
-  project?: {
-    _id: string;
-    name: string;
-  };
+  parentTask?: ParentTask | string | null;
+  assignee?: TaskUser | string | null;
+  reporter?: TaskUser | string | null;
+  project?: TaskProject | string | null;
 }
 
-interface TasksResponse {
+// API responses
+export interface TasksResponse {
   message?: string;
   count?: number;
   pagination?: {
@@ -45,26 +57,39 @@ interface TasksResponse {
   tasks: Task[];
 }
 
-interface UpdateTaskResponse {
+export interface UpdateTaskResponse {
   message: string;
   task: Task;
 }
 
-interface UpdateTaskRequest {
+export interface UpdateTaskRequest {
   id: string;
   status: TaskStatus;
 }
 
-interface Project {
+export interface Project {
   _id: string;
   name: string;
 }
 
-interface ProjectsResponse {
+export interface ProjectsResponse {
   projects: Project[];
 }
 
-interface CreateTaskRequest {
+// Project members for the assignee dropdown
+export interface ProjectMember {
+  _id: string;
+  name: string;
+  email: string;
+}
+
+export interface ProjectMembersResponse {
+  message: string;
+  members: ProjectMember[];
+}
+
+// Create task request
+export interface CreateTaskRequest {
   title: string;
   description?: string;
   type: TaskType;
@@ -75,7 +100,7 @@ interface CreateTaskRequest {
   parentTask?: string;
 }
 
-interface CreateTaskResponse {
+export interface CreateTaskResponse {
   message: string;
   task: Task;
 }
@@ -107,13 +132,13 @@ export const taskApi = createApi({
   tagTypes: ["Tasks", "Projects"],
 
   endpoints: (builder) => ({
-    // Fetch tasks and refresh them after a task is created or updated.
+    // Fetch all tasks
     getTasks: builder.query<TasksResponse, void>({
       query: () => "/tasks",
       providesTags: ["Tasks"],
     }),
 
-    // Update a task's status.
+    // Update task status
     updateTask: builder.mutation<
       UpdateTaskResponse,
       UpdateTaskRequest
@@ -126,13 +151,21 @@ export const taskApi = createApi({
       invalidatesTags: ["Tasks"],
     }),
 
-    // Fetch projects available to the logged-in user.
+    // Fetch projects
     getProjects: builder.query<ProjectsResponse, void>({
       query: () => "/projects",
       providesTags: ["Projects"],
     }),
 
-    // Create a task and refresh the task board/list.
+    // Fetch members of a project
+    getProjectMembers: builder.query<
+      ProjectMembersResponse,
+      string
+    >({
+      query: (projectId) => `/projects/${projectId}/members`,
+    }),
+
+    // Create a task and optionally assign it to a member
     createTask: builder.mutation<
       CreateTaskResponse,
       CreateTaskRequest
@@ -151,5 +184,6 @@ export const {
   useGetTasksQuery,
   useUpdateTaskMutation,
   useGetProjectsQuery,
+  useGetProjectMembersQuery,
   useCreateTaskMutation,
 } = taskApi;
