@@ -54,7 +54,9 @@ const taskSchema = new Schema<ITask>(
     },
     organization: { type: String, required: true },
     parentTask: { type: Schema.Types.ObjectId, ref: "Task" },
-    dueDate: { type: Date },
+    dueDate: {
+  type: Date,
+},
   },
   { timestamps: true }
 );

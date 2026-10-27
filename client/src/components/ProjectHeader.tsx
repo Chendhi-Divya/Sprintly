@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import {
   Search,
   Filter,
-  Layers2,
   LayoutDashboard,
   List,
   FolderKanban,
@@ -143,59 +142,51 @@ export default function ProjectHeader({
         )}
       </div>
 
-      {/* Board and List tabs */}
-      <div className="mt-5 flex gap-6 overflow-x-auto px-4 sm:px-6">
-        {(["List", "Board"] as const).map((tab) => {
-          const Icon =
-            tab === "List" ? List : LayoutDashboard;
+      {/* View tabs and search/filter controls */}
+      <div className="flex flex-wrap items-center justify-between gap-4 border-t border-gray-100 px-4 pt-3 sm:px-6">
+        <div className="flex gap-6 overflow-x-auto">
+          {(["List", "Board"] as const).map((tab) => {
+            const Icon = tab === "List" ? List : LayoutDashboard;
 
-          return (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => handleTabChange(tab)}
-              className={`flex shrink-0 items-center gap-2 border-b-2 pb-3 text-sm ${
-                activeTab === tab
-                  ? "border-blue-600 font-semibold text-blue-600"
-                  : "border-transparent text-gray-500 hover:text-gray-800"
-              }`}
-            >
-              <Icon size={16} />
-              {tab}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Search, Filter and Group */}
-      <div className="flex flex-wrap items-center gap-3 border-t border-gray-100 px-4 py-4 sm:px-6">
-        <div className="flex w-full max-w-xs items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 sm:w-72">
-          <Search size={18} className="shrink-0 text-gray-400" />
-
-          <input
-            type="text"
-            placeholder={`Search ${activeTab.toLowerCase()}`}
-            value={searchText}
-            onChange={(event) => setSearchText(event.target.value)}
-            className="w-full min-w-0 bg-transparent text-sm outline-none"
-          />
+            return (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => handleTabChange(tab)}
+                className={`flex shrink-0 items-center gap-2 border-b-2 pb-3 text-sm ${
+                  activeTab === tab
+                    ? "border-blue-600 font-semibold text-blue-600"
+                    : "border-transparent text-gray-500 hover:text-gray-800"
+                }`}
+              >
+                <Icon size={16} />
+                {tab}
+              </button>
+            );
+          })}
         </div>
 
-        <button
-          type="button"
-          className="flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-        >
-          <Filter size={16} />
-          Filter
-        </button>
+        <div className="mb-3 ml-auto flex flex-wrap items-center justify-end gap-3">
+          <div className="flex w-full max-w-xs items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 sm:w-72">
+            <Search size={18} className="shrink-0 text-gray-400" />
 
-        <button
-          type="button"
-          className="flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-        >
-          <Layers2 size={16} />
-          Group
-        </button>
+            <input
+              type="text"
+              placeholder={`Search ${activeTab.toLowerCase()}`}
+              value={searchText}
+              onChange={(event) => setSearchText(event.target.value)}
+              className="w-full min-w-0 bg-transparent text-sm outline-none"
+            />
+          </div>
+
+          <button
+            type="button"
+            className="flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            <Filter size={16} />
+            Filter
+          </button>
+        </div>
       </div>
     </div>
   );

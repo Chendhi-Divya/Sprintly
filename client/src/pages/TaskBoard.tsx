@@ -1,10 +1,10 @@
 
 import { useState } from "react";
 
+
 import {
   useGetTasksQuery,
   useUpdateTaskMutation,
-  useGetProjectMembersQuery,
   type TaskStatus,
 } from "../services/taskApi";
 
@@ -24,23 +24,16 @@ const columns: TaskStatus[] = [
 export default function TaskBoard({
   selectedProjectId,
 }: TaskBoardProps) {
-  // Fetch tasks for the board
   const { data, isLoading } = useGetTasksQuery();
-
-  // Fetch members of the selected project
-  const { data: membersData } = useGetProjectMembersQuery(
-    selectedProjectId,
-    {
-      skip: !selectedProjectId,
-    }
-  );
 
   const [updateTask, { isLoading: isUpdatingTask }] =
     useUpdateTaskMutation();
 
+
   const [message, setMessage] = useState("");
 
-  // Get tasks belonging to the selected project
+
+  // Show tasks belonging to the selected project.
   const tasks = (data?.tasks ?? []).filter((task) => {
     const projectId =
       typeof task.project === "string"
@@ -49,8 +42,6 @@ export default function TaskBoard({
 
     return projectId === selectedProjectId;
   });
-
-  const members = membersData?.members ?? [];
 
   // Update task status
   async function handleStatusChange(
@@ -79,7 +70,7 @@ export default function TaskBoard({
           Manage and track your tasks.
         </p>
       </div>
-
+      
       {/* Status message */}
       {message && (
         <p className="mb-4 rounded-lg bg-gray-100 p-3 text-sm">
@@ -87,7 +78,7 @@ export default function TaskBoard({
         </p>
       )}
 
-      {/* Task board columns */}
+      {/* Task columns */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         {columns.map((status) => {
           const columnTasks = tasks.filter(
@@ -101,7 +92,6 @@ export default function TaskBoard({
             >
               <div className="mb-4 flex justify-between">
                 <h3 className="font-semibold">{status}</h3>
-
                 <span className="rounded-full border bg-white px-2">
                   {columnTasks.length}
                 </span>

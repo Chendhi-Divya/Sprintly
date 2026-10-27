@@ -160,13 +160,22 @@ function TaskCard({
         </div>
       </div>
 
-      {/* Due date */}
-      {task.dueDate && (
-        <p className="mb-3 flex items-center gap-2 text-xs text-gray-500">
-          <CalendarDays size={14} />
-          Due: {new Date(task.dueDate).toLocaleDateString("en-IN")}
-        </p>
-      )}
+    {/* Due Date */}
+
+{task.dueDate && (
+  <div className="mt-2 flex items-center gap-2 text-sm">
+    <CalendarDays size={15} className="shrink-0" />
+
+    <span>
+      Due {new Date(task.dueDate).toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })}
+    </span>
+  </div>
+)}
+
 
       {/* Change task status */}
       <div className="relative">

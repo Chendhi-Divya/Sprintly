@@ -36,6 +36,8 @@ export interface Task {
   status: TaskStatus;
   priority: TaskPriority;
   dueDate?: string;
+  createdAt?: string;
+
   parentTask?: ParentTask | string | null;
   assignee?: TaskUser | string | null;
   reporter?: TaskUser | string | null;
@@ -70,10 +72,22 @@ export interface UpdateTaskRequest {
 export interface Project {
   _id: string;
   name: string;
+  organization?: string;
+  organizationName?: string;
+}
+
+export interface Organization {
+  _id?: string;
+  org_id: string;
+  org_name: string;
 }
 
 export interface ProjectsResponse {
   projects: Project[];
+}
+
+export interface OrganizationsResponse {
+  organizations: Organization[];
 }
 
 // Project members for the assignee dropdown
@@ -157,6 +171,11 @@ export const taskApi = createApi({
       providesTags: ["Projects"],
     }),
 
+    // Fetch organizations to resolve project organization IDs to names.
+    getOrganizations: builder.query<OrganizationsResponse, void>({
+      query: () => "/organizations",
+    }),
+
     // Fetch members of a project
     getProjectMembers: builder.query<
       ProjectMembersResponse,
@@ -184,6 +203,7 @@ export const {
   useGetTasksQuery,
   useUpdateTaskMutation,
   useGetProjectsQuery,
+  useGetOrganizationsQuery,
   useGetProjectMembersQuery,
   useCreateTaskMutation,
 } = taskApi;

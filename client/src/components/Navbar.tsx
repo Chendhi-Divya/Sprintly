@@ -1,6 +1,8 @@
 
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
+import { useDispatch, useSelector } from "react-redux";
+import { useNavigate } from "react-router-dom";
 import {
   Search,
   Plus,
@@ -10,8 +12,13 @@ import {
   X,
 } from "lucide-react";
 
+import { logout } from "../store/authSlice";
+import type { RootState } from "../store/store";
+import { useLogoutMutation } from "../services/authApi";
+
 import {
   useGetProjectsQuery,
+  useGetOrganizationsQuery,
   useGetTasksQuery,
   useCreateTaskMutation,
   useGetProjectMembersQuery,
@@ -19,6 +26,19 @@ import {
 
 type TaskType = "Epic" | "Story" | "Task" | "Bug";
 type TaskPriority = "Low" | "Medium" | "High";
+
+type Organization = {
+  _id: string;
+  org_id?: string;
+  org_name: string;
+};
+
+type Project = {
+  _id: string;
+  name: string;
+  organization?: string | Organization | null;
+  organizationName?: string;
+};
 
 type Task = {
   _id: string;
@@ -73,11 +93,58 @@ function getProjectId(task: Task): string {
   return task.projectId ?? "";
 }
 
+function getOrganizationName(
+  project: Project | undefined,
+  organizations: Organization[]
+): string {
+  if (!project) {
+    return "";
+  }
+
+  // Prefer the organization name explicitly returned by the API.
+  if (project.organizationName?.trim()) {
+    return project.organizationName.trim();
+  }
+
+  const projectOrganization = project.organization;
+
+  // Handle a populated organization object.
+  if (
+    projectOrganization &&
+    typeof projectOrganization === "object"
+  ) {
+    if (projectOrganization.org_name?.trim()) {
+      return projectOrganization.org_name.trim();
+    }
+
+    const organizationId = projectOrganization._id;
+
+    const matchedOrganization = organizations.find(
+      (organization) => organization._id === organizationId
+    );
+
+    return matchedOrganization?.org_name?.trim() ?? "";
+  }
+
+  // The projects API currently returns organization as a MongoDB ID.
+  if (typeof projectOrganization === "string") {
+    const matchedOrganization = organizations.find(
+      (organization) =>
+        organization._id === projectOrganization
+    );
+
+    return matchedOrganization?.org_name?.trim() ?? "";
+  }
+
+  return "";
+}
+
 export default function Navbar({
   selectedProjectId = "",
 }: NavbarProps) {
   const [searchText, setSearchText] = useState("");
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -88,12 +155,20 @@ export default function Navbar({
   const [dueDate, setDueDate] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
+  const user = useSelector((state: RootState) => state.auth.user);
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
+
+  const [logoutRequest, { isLoading: isLoggingOut }] =
+    useLogoutMutation();
+
   const {
     data: projectsData,
     isLoading: isLoadingProjects,
     isError: isProjectsError,
-    refetch: refetchProjects,
   } = useGetProjectsQuery();
+
+  const { data: organizationsData } = useGetOrganizationsQuery();
 
   const {
     data: tasksData,
@@ -106,10 +181,13 @@ export default function Navbar({
   const [createTask, { isLoading: isCreating }] =
     useCreateTaskMutation();
 
-  const projects = projectsData?.projects ?? [];
+  const projects = (projectsData?.projects ?? []) as Project[];
+  const organizations = (
+    organizationsData?.organizations ?? []
+  ) as Organization[];
   const tasks = getTasks(tasksData);
 
-  // Find the project currently selected.
+  // Find the currently selected project.
   const projectId =
     selectedProjectId ||
     (projects.length === 1 ? projects[0]._id : "");
@@ -118,7 +196,12 @@ export default function Navbar({
     (project) => project._id === projectId
   );
 
-  // Fetch members of this project.
+  // Resolve the organization name for that project.
+  const organizationName = getOrganizationName(
+    selectedProject,
+    organizations
+  );
+
   const {
     data: membersData,
     isLoading: isLoadingMembers,
@@ -130,7 +213,6 @@ export default function Navbar({
 
   const members = membersData?.members ?? [];
 
-  // Find existing tasks in this project for the Parent Task dropdown.
   const parentTasks = tasks.filter(
     (task) =>
       task._id &&
@@ -150,23 +232,31 @@ export default function Navbar({
     setPriority("Medium");
     setAssignee("");
     setParentTask("");
+    setDueDate("");
     setErrorMessage("");
   }
 
   function handleCreate() {
     resetForm();
     setShowCreateForm(true);
+  }
 
-    void refetchProjects();
-    void refetchTasks();
-
-    if (projectId) {
-      void refetchMembers();
+  async function handleLogout() {
+    try {
+      await logoutRequest().unwrap();
+    } catch {
+      // Clear the local session even if the server is unavailable.
+    } finally {
+      dispatch(logout());
+      setShowProfileMenu(false);
+      navigate("/login");
     }
   }
 
   function handleClose() {
-    if (isCreating) return;
+    if (isCreating) {
+      return;
+    }
 
     setShowCreateForm(false);
     setErrorMessage("");
@@ -184,7 +274,9 @@ export default function Navbar({
     }
 
     if (isProjectsError) {
-      setErrorMessage("Could not load projects. Please try again.");
+      setErrorMessage(
+        "Could not load projects. Please try again."
+      );
       return;
     }
 
@@ -206,8 +298,10 @@ export default function Navbar({
       return;
     }
 
-    // Do not submit a selected assignee if members failed to load.
-    if (assignee && !members.some((member) => member._id === assignee)) {
+    if (
+      assignee &&
+      !members.some((member) => member._id === assignee)
+    ) {
       setErrorMessage(
         "The selected assignee is invalid. Please reload the members."
       );
@@ -223,6 +317,7 @@ export default function Navbar({
         project: projectId,
         ...(assignee ? { assignee } : {}),
         ...(parentTask ? { parentTask } : {}),
+        ...(dueDate ? { dueDate } : {}),
       }).unwrap();
 
       resetForm();
@@ -244,7 +339,9 @@ export default function Navbar({
             "Failed to create task. Please try again."
         );
       } else {
-        setErrorMessage("Failed to create task. Please try again.");
+        setErrorMessage(
+          "Failed to create task. Please try again."
+        );
       }
     }
   }
@@ -271,7 +368,7 @@ export default function Navbar({
   return (
     <>
       <nav className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-200 bg-white px-5 py-3">
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex min-w-0 shrink-0 items-center gap-2">
           <div className="rounded-lg bg-blue-600 p-2 text-white">
             <CheckCheck size={21} />
           </div>
@@ -279,17 +376,37 @@ export default function Navbar({
           <h1 className="text-xl font-bold text-gray-900">
             Sprintly
           </h1>
+
+          {organizationName && (
+            <>
+              <span aria-hidden="true" className="text-gray-300">
+                /
+              </span>
+
+              <span
+                className="max-w-56 truncate text-base font-semibold text-gray-700"
+                title={organizationName}
+              >
+                {organizationName}
+              </span>
+            </>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
           <div className="flex w-56 items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 focus-within:border-blue-500">
-            <Search size={17} className="shrink-0 text-gray-500" />
+            <Search
+              size={17}
+              className="shrink-0 text-gray-500"
+            />
 
             <input
               type="text"
               placeholder="Search tasks..."
               value={searchText}
-              onChange={(event) => setSearchText(event.target.value)}
+              onChange={(event) =>
+                setSearchText(event.target.value)
+              }
               className="w-full min-w-0 bg-transparent text-sm text-gray-800 outline-none"
             />
           </div>
@@ -313,13 +430,48 @@ export default function Navbar({
             <Bell size={21} />
           </button>
 
-          <button
-            type="button"
-            aria-label="Profile"
-            className="rounded-full bg-gray-100 p-2 text-gray-700 hover:bg-gray-200"
-          >
-            <UserRound size={20} />
-          </button>
+          <div className="relative">
+            <button
+              type="button"
+              aria-label="Open profile menu"
+              aria-expanded={showProfileMenu}
+              onClick={() =>
+                setShowProfileMenu((open) => !open)
+              }
+              className="flex items-center gap-2 rounded-full bg-gray-100 py-1.5 pl-2 pr-3 text-sm font-medium text-gray-700 hover:bg-gray-200"
+            >
+              <UserRound size={20} />
+
+              <span className="max-w-32 truncate">
+                {user?.name || "Profile"}
+              </span>
+            </button>
+
+            {showProfileMenu && (
+              <div className="absolute right-0 top-full z-40 mt-2 w-56 rounded-lg border border-gray-200 bg-white p-2 shadow-lg">
+                <div className="border-b border-gray-100 px-3 py-2">
+                  <p className="truncate text-sm font-semibold text-gray-900">
+                    {user?.name || "User"}
+                  </p>
+
+                  {user?.email && (
+                    <p className="truncate text-xs text-gray-500">
+                      {user.email}
+                    </p>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => void handleLogout()}
+                  disabled={isLoggingOut}
+                  className="mt-1 w-full rounded-md px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
+                >
+                  {isLoggingOut ? "Logging out..." : "Log out"}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </nav>
 
@@ -375,13 +527,15 @@ export default function Navbar({
                   htmlFor="task-title"
                   className="mb-1 block text-sm font-medium text-gray-700"
                 >
-                  Task Title 
+                  Task Title
                 </label>
 
                 <input
                   id="task-title"
                   value={title}
-                  onChange={(event) => setTitle(event.target.value)}
+                  onChange={(event) =>
+                    setTitle(event.target.value)
+                  }
                   placeholder="Enter task title"
                   required
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
@@ -399,7 +553,9 @@ export default function Navbar({
                 <textarea
                   id="task-description"
                   value={description}
-                  onChange={(event) => setDescription(event.target.value)}
+                  onChange={(event) =>
+                    setDescription(event.target.value)
+                  }
                   placeholder="Describe the task"
                   rows={2}
                   className="w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
@@ -442,7 +598,9 @@ export default function Navbar({
                     id="task-priority"
                     value={priority}
                     onChange={(event) =>
-                      setPriority(event.target.value as TaskPriority)
+                      setPriority(
+                        event.target.value as TaskPriority
+                      )
                     }
                     className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
                   >
@@ -452,28 +610,27 @@ export default function Navbar({
                   </select>
                 </div>
               </div>
-            
-{/* Due Date */}
-<div className="space-y-1">
-  <label
-    htmlFor="dueDate"
-    className="text-sm font-medium text-gray-700"
-  >
-    Due Date
-  </label>
 
-  <input
-    id="dueDate"
-    name="dueDate"
-    type="date"
-    value={dueDate}
-    onChange={(event) => setDueDate(event.target.value)}
-    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
-  />
-</div>
+              <div className="space-y-1">
+                <label
+                  htmlFor="dueDate"
+                  className="block text-sm font-medium text-gray-700"
+                >
+                  Due Date
+                </label>
 
+                <input
+                  id="dueDate"
+                  name="dueDate"
+                  type="date"
+                  value={dueDate}
+                  onChange={(event) =>
+                    setDueDate(event.target.value)
+                  }
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                />
+              </div>
 
-              {/* Assignee dropdown */}
               <div>
                 <label
                   htmlFor="task-assignee"
@@ -485,8 +642,14 @@ export default function Navbar({
                 <select
                   id="task-assignee"
                   value={assignee}
-                  onChange={(event) => setAssignee(event.target.value)}
-                  disabled={!projectId || isLoadingMembers || isMembersError}
+                  onChange={(event) =>
+                    setAssignee(event.target.value)
+                  }
+                  disabled={
+                    !projectId ||
+                    isLoadingMembers ||
+                    isMembersError
+                  }
                   className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
                 >
                   <option value="">
@@ -524,16 +687,15 @@ export default function Navbar({
                   htmlFor="parent-task"
                   className="mb-1 block text-sm font-medium text-gray-700"
                 >
-                  Parent Task{" "}
-                  <span className="font-normal text-gray-400">
-                   
-                  </span>
+                  Parent Task
                 </label>
 
                 <select
                   id="parent-task"
                   value={parentTask}
-                  onChange={(event) => setParentTask(event.target.value)}
+                  onChange={(event) =>
+                    setParentTask(event.target.value)
+                  }
                   disabled={
                     isLoadingTasks ||
                     isFetchingTasks ||
@@ -542,7 +704,9 @@ export default function Navbar({
                   }
                   className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
                 >
-                  <option value="">{parentTaskPlaceholder}</option>
+                  <option value="">
+                    {parentTaskPlaceholder}
+                  </option>
 
                   {parentTasks.map((task) => (
                     <option key={task._id} value={task._id}>

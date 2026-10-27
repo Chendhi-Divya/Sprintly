@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import Project from "../models/project.js";
+import Organization from "../models/Organization.js";
 import User from "../models/User.js";
 
 export const createProject = async (req: Request, res: Response) => {
@@ -52,13 +53,31 @@ export const getProjects = async (req: Request, res: Response) => {
       });
     }
 
-    const projects = await Project.find({
-      members: userId,
+    const [projects, organizations] = await Promise.all([
+      Project.find({ members: userId }),
+      Organization.find({ members: userId }).select("org_id org_name"),
+    ]);
+
+    const organizationNames = new Map<string, string>();
+    for (const organization of organizations) {
+      organizationNames.set(organization.org_id.trim().toLowerCase(), organization.org_name);
+      organizationNames.set(organization._id.toString().toLowerCase(), organization.org_name);
+      organizationNames.set(organization.org_name.trim().toLowerCase(), organization.org_name);
+    }
+
+    const projectsWithOrganizationNames = projects.map((project) => {
+      const projectData = project.toObject();
+      const organizationValue = project.organization.trim().toLowerCase();
+
+      return {
+        ...projectData,
+        organizationName: organizationNames.get(organizationValue),
+      };
     });
 
     return res.status(200).json({
       message: "Projects fetched successfully",
-      projects,
+      projects: projectsWithOrganizationNames,
     });
   } catch (error) {
     console.error("GET PROJECTS ERROR:", error);
