@@ -1,23 +1,30 @@
 
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useDispatch } from "react-redux";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useNavigate } from "react-router-dom";
+import { useDispatch } from "react-redux";
+
+import {
+  setCredentials,
+  setSelectedOrganization,
+} from "../store/authSlice";
+
+import { Button } from "../components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
 import { Eye, EyeOff } from "lucide-react";
 
-import { setCredentials } from "../store/authSlice";
 import { useLoginMutation } from "../services/authApi";
-import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
+import { useLazyGetOrganizationsQuery } from "../services/taskApi";
 
 const loginSchema = z.object({
   email: z
     .string()
     .min(1, "Email is required")
-    .email("Enter a valid email"),
+    .email("Please enter a valid email"),
 
   password: z
     .string()
@@ -33,7 +40,14 @@ export default function Login() {
 
   const navigate = useNavigate();
   const dispatch = useDispatch();
-  const [loginUser, { isLoading }] = useLoginMutation();
+
+  const [loginUser, { isLoading: isLoginLoading }] =
+    useLoginMutation();
+
+  const [
+    getOrganizations,
+    { isFetching: isOrganizationsLoading },
+  ] = useLazyGetOrganizationsQuery();
 
   const {
     register,
@@ -43,55 +57,63 @@ export default function Login() {
     resolver: zodResolver(loginSchema),
   });
 
-  async function onSubmit(data: LoginFormData) {
+  const onSubmit = async (data: LoginFormData) => {
     setErrorMessage("");
 
     try {
-      const response = await loginUser(data).unwrap();
+      // Step 1: Log in
+      const response = await loginUser({
+        email: data.email,
+        password: data.password,
+      }).unwrap();
 
-      console.log("Login successful:", response);
-
+      // Step 2: Save the logged-in user
       dispatch(
         setCredentials({
           user: response.user,
-          token: response.token
         })
       );
 
-      navigate("/dashboard");
-    } catch (error: unknown) {
-      console.error("Login failed:", error);
+      // Step 3: Fetch the user's organizations
+      const organizationResponse =
+  await getOrganizations().unwrap();
 
-      const message =
-        typeof error === "object" &&
-        error !== null &&
-        "data" in error &&
-        typeof error.data === "object" &&
-        error.data !== null &&
-        "message" in error.data &&
-        typeof error.data.message === "string"
-          ? error.data.message
-          : "Login failed. Please check your email and password.";
+const organizations = organizationResponse.organizations;
 
-      setErrorMessage(message);
+if (organizations.length === 1) {
+  dispatch(setSelectedOrganization(organizations[0]));
+  navigate("/dashboard");
+} else {
+  navigate("/organizations");
+}
+    } catch (error: any) {
+      console.error("Login or organization loading failed:", error);
+
+      setErrorMessage(
+        error?.data?.message ||
+          "Unable to log in or load organizations. Please try again."
+      );
     }
-  }
+  };
+
+  const isLoading = isLoginLoading || isOrganizationsLoading;
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50">
-      <div className="w-full max-w-md rounded-lg bg-white p-6 shadow">
-        <h1 className="text-center text-2xl font-bold">
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="w-full max-w-md p-6">
+        <h1 className="text-2xl font-bold text-center">
           Login
         </h1>
 
-        <p className="mt-2 text-center text-gray-500">
+        <p className="text-center text-gray-500 mt-2">
           Login to your Sprintly account
         </p>
 
         <form
           onSubmit={handleSubmit(onSubmit)}
-          className="mt-6 space-y-5"
+          className="space-y-5 mt-6"
         >
+          {/* Email */}
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
 
@@ -109,6 +131,7 @@ export default function Login() {
             )}
           </div>
 
+          {/* Password */}
           <div className="space-y-2">
             <Label htmlFor="password">Password</Label>
 
@@ -130,9 +153,9 @@ export default function Login() {
                 }
               >
                 {showPassword ? (
-                  <EyeOff size={18} />
+                  <EyeOff className="h-4 w-4" />
                 ) : (
-                  <Eye size={18} />
+                  <Eye className="h-4 w-4" />
                 )}
               </button>
             </div>
@@ -144,6 +167,7 @@ export default function Login() {
             )}
           </div>
 
+          {/* Forgot Password */}
           <div className="text-right">
             <button
               type="button"
@@ -154,26 +178,31 @@ export default function Login() {
             </button>
           </div>
 
+          {/* Error Message */}
           {errorMessage && (
-            <p className="text-center text-sm text-red-500">
+            <p className="text-sm text-red-500 text-center">
               {errorMessage}
             </p>
           )}
 
+          {/* Login Button */}
           <Button
             type="submit"
             className="w-full"
             disabled={isLoading}
           >
-            {isLoading ? "Logging in..." : "Login"}
+            {isLoading
+              ? "Please wait..."
+              : "Login"}
           </Button>
 
+          {/* Register Link */}
           <p className="text-center text-sm text-gray-500">
             Don't have an account?{" "}
             <button
               type="button"
               onClick={() => navigate("/register")}
-              className="text-black underline"
+              className="underline text-black"
             >
               Register
             </button>

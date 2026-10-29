@@ -1,8 +1,84 @@
 
 import type { Request, Response } from "express";
+import mongoose from "mongoose";
 import Task from "../models/task.js";
-import Project from "../models/project.js";
+import Project, { type IProject } from "../models/project.js";
 import TaskCounter from "../models/taskCounter.js";
+import Notification from "../models/Notification.js";
+import Organization from "../models/Organization.js";
+
+async function assigneeBelongsToProjectOrganization(
+  organizationValue: string,
+  assigneeId: string
+): Promise<boolean> {
+  const organizationMatch = [
+    { org_id: organizationValue },
+    { org_name: organizationValue },
+    ...(mongoose.isValidObjectId(organizationValue)
+      ? [{ _id: organizationValue }]
+      : []),
+  ];
+  const organization = await Organization.findOne({
+    $or: organizationMatch,
+    members: assigneeId,
+  });
+
+  return Boolean(organization);
+}
+
+async function ensureProjectTaskKeys(project: IProject): Promise<void> {
+  if (!project.key) {
+    const words = project.name.trim().split(/\s+/).filter(Boolean);
+    const baseKey = (words.length > 1
+      ? words.map((word) => word[0]).join("")
+      : words[0] ?? "PRJ")
+      .replace(/[^a-zA-Z0-9]/g, "")
+      .toUpperCase()
+      .slice(0, 4);
+    let key = baseKey.length >= 2 ? baseKey : "PRJ";
+    let suffix = 2;
+
+    while (await Project.exists({ key, _id: { $ne: project._id } })) {
+      key = `${baseKey.slice(0, 6)}${suffix}`;
+      suffix += 1;
+    }
+
+    project.key = key;
+    await project.save();
+  }
+
+  const projectTasks = await Task.find({ project: project._id })
+    .sort({ createdAt: 1, _id: 1 });
+  const expectedKeys = projectTasks.map(
+    (_task, index) => `${project.key}-${String(index + 1).padStart(2, "0")}`
+  );
+
+  if (projectTasks.every((task, index) => task.taskKey === expectedKeys[index])) {
+    await TaskCounter.updateOne(
+      { _id: project._id.toString() },
+      { $set: { seq: projectTasks.length } },
+      { upsert: true }
+    );
+    return;
+  }
+
+  // Move old type-based keys out of the way before assigning project-based keys.
+  for (const task of projectTasks) {
+    task.taskKey = `MIG-${task._id.toString()}`;
+    await task.save();
+  }
+
+  for (const [index, task] of projectTasks.entries()) {
+    task.taskKey = expectedKeys[index]!;
+    await task.save();
+  }
+
+  await TaskCounter.updateOne(
+    { _id: project._id.toString() },
+    { $set: { seq: projectTasks.length } },
+    { upsert: true }
+  );
+}
 
 // CREATE TASK
 export const createTask = async (req: Request, res: Response) => {
@@ -62,6 +138,18 @@ export const createTask = async (req: Request, res: Response) => {
           message: "Assignee must be a member of the project",
         });
       }
+
+      const belongsToOrganization =
+        await assigneeBelongsToProjectOrganization(
+          existingProject.organization,
+          assignee.toString()
+        );
+
+      if (!belongsToOrganization) {
+        return res.status(403).json({
+          message: "Assignee must belong to the project's organization",
+        });
+      }
     }
 
     // Check parent task.
@@ -81,30 +169,26 @@ export const createTask = async (req: Request, res: Response) => {
       }
     }
 
-    // Generate a readable task ID.
-    const prefixes: Record<string, string> = {
-      Epic: "EPIC",
-      Story: "STORY",
-      Task: "TASK",
-      Bug: "BUG",
-      "Sub-task": "SUB",
-    };
-
-    const prefix = prefixes[type];
-
-    if (!prefix) {
-      return res.status(400).json({
-        message: "Invalid task type",
-      });
+    // Generate a readable task key within this project (for example DIV-01).
+    if (!existingProject.key) {
+      const words = existingProject.name.trim().split(/\s+/).filter(Boolean);
+      const rawKey = (words.length > 1
+        ? words.map((word) => word[0]).join("")
+        : words[0] ?? "PRJ")
+        .replace(/[^a-zA-Z0-9]/g, "")
+        .toUpperCase()
+        .slice(0, 4);
+      existingProject.key = rawKey.length >= 2 ? rawKey : "PRJ";
+      await existingProject.save();
     }
 
     const counter = await TaskCounter.findOneAndUpdate(
-      { _id: prefix },
+      { _id: existingProject._id.toString() },
       { $inc: { seq: 1 } },
       { new: true, upsert: true }
     );
 
-    const taskKey = `${prefix}-${String(counter.seq).padStart(3, "0")}`;
+    const taskKey = `${existingProject.key}-${String(counter.seq).padStart(2, "0")}`;
 
     // Save the task.
     const task = await Task.create({
@@ -120,6 +204,24 @@ export const createTask = async (req: Request, res: Response) => {
       dueDate,
       parentTask: parentTask || undefined,
     });
+
+    // Notify the assignee when a task is created.
+    if (assignee && assignee.toString() !== userId.toString()) {
+      try {
+        await Notification.create({
+          recipient: assignee,
+          type: "task_assigned",
+          message: `You have been assigned to task "${task.title}" (${task.taskKey}).`,
+          task: task._id,
+        });
+      } catch (notificationError) {
+        // A notification failure should not undo task creation.
+        console.error(
+          "CREATE TASK NOTIFICATION ERROR:",
+          notificationError
+        );
+      }
+    }
 
     const populatedTask = await Task.findById(task._id)
       .populate("project", "name")
@@ -171,9 +273,13 @@ export const getTasks = async (req: Request, res: Response) => {
     const pageLimit = Math.min(limit, 100);
     const skip = (page - 1) * pageLimit;
 
-    // Show tasks reported by or assigned to this user.
+    // Include all tasks in projects the user belongs to, not only tasks they
+    // reported or were assigned. Project membership is the access boundary.
+    const userProjects = await Project.find({ members: userId });
+    const userProjectIds = userProjects.map((project) => project._id);
+
     const filter: any = {
-      $or: [{ reporter: userId }, { assignee: userId }],
+      project: { $in: userProjectIds },
     };
 
     if (typeof search === "string" && search.trim()) {
@@ -199,6 +305,12 @@ export const getTasks = async (req: Request, res: Response) => {
       filter.type = type;
     }
 
+    // Replace legacy type-based keys (for example STORY-006) with stable,
+    // project-based keys that increase across every task type (for example DIV-01).
+    for (const project of userProjects) {
+      await ensureProjectTaskKeys(project);
+    }
+
     const totalTasks = await Task.countDocuments(filter);
 
     const tasks = await Task.find(filter)
@@ -206,7 +318,7 @@ export const getTasks = async (req: Request, res: Response) => {
       .populate("assignee", "name email")
       .populate("reporter", "name email")
       .populate("parentTask", "title taskKey")
-      .sort({ createdAt: -1, _id: -1 })
+      .sort({ createdAt: 1, _id: 1 })
       .skip(skip)
       .limit(pageLimit);
 
@@ -294,6 +406,8 @@ export const updateTask = async (req: Request, res: Response) => {
       });
     }
 
+    const previousAssigneeId = task.assignee?.toString();
+
     const project = await Project.findById(task.project);
 
     if (!project) {
@@ -369,6 +483,18 @@ export const updateTask = async (req: Request, res: Response) => {
           message: "Assignee must be a member of the project",
         });
       }
+
+      const belongsToOrganization =
+        await assigneeBelongsToProjectOrganization(
+          project.organization,
+          assignee.toString()
+        );
+
+      if (!belongsToOrganization) {
+        return res.status(403).json({
+          message: "Assignee must belong to the project's organization",
+        });
+      }
     }
 
     if (title !== undefined) task.title = title;
@@ -390,6 +516,30 @@ export const updateTask = async (req: Request, res: Response) => {
     }
 
     await task.save();
+
+    // Notify the new assignee when a task is assigned or reassigned.
+    const newAssigneeId = task.assignee?.toString();
+
+    if (
+      newAssigneeId &&
+      newAssigneeId !== previousAssigneeId &&
+      newAssigneeId !== userId.toString()
+    ) {
+      try {
+        await Notification.create({
+          recipient: newAssigneeId,
+          type: "task_assigned",
+          message: `You have been assigned to task "${task.title}" (${task.taskKey}).`,
+          task: task._id,
+        });
+      } catch (notificationError) {
+        // Keep the successful task update even if notification creation fails.
+        console.error(
+          "UPDATE TASK NOTIFICATION ERROR:",
+          notificationError
+        );
+      }
+    }
 
     const updatedTask = await Task.findById(task._id)
       .populate("project", "name")

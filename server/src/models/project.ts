@@ -2,6 +2,7 @@ import mongoose, { Schema, Document } from "mongoose";
 
 export interface IProject extends Document {
   name: string;
+  key: string;
   description?: string;
   organization: string;
   owner: mongoose.Types.ObjectId;
@@ -14,6 +15,16 @@ const projectSchema = new Schema<IProject>(
       type: String,
       required: true,
       trim: true,
+    },
+
+    key: {
+      type: String,
+      required: true,
+      unique: true,
+      uppercase: true,
+      trim: true,
+      minlength: 2,
+      maxlength: 8,
     },
 
     description: {

@@ -4,7 +4,7 @@ import { useForm } from "react-hook-form"; //imports useForm from React Hook For
 import { z } from "zod"; //imports Zod to create validation rules for the form.
 import { zodResolver } from "@hookform/resolvers/zod"; //connects Zod validation with React Hook Form.
 
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useRegisterMutation } from "../services/authApi";
 
 import { Button } from "@/components/ui/button";
@@ -58,6 +58,9 @@ type RegisterFormData = z.infer<typeof registerSchema>;
 export default function Register() {
   //This allows us to move the user to another page.
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const invitationId = searchParams.get("invitationId") ?? "";
+  const invitedEmail = searchParams.get("email") ?? "";
 
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -75,6 +78,9 @@ export default function Register() {
   setError,
 } = useForm<RegisterFormData>({
   resolver: zodResolver(registerSchema),
+  defaultValues: {
+    email: invitedEmail,
+  },
 });
 
   //This function runs after the form is successfully submitted through handleSubmit.
@@ -100,6 +106,7 @@ export default function Register() {
       navigate("/verify-email", {
         state: {
           email: data.email,
+          invitationId,
         },
       });
   } catch (error: any) {
@@ -161,7 +168,9 @@ export default function Register() {
             </h2>
 
             <p className="mt-1 text-sm text-slate-500">
-              Enter your details to get started.
+              {invitationId
+                ? "Create your account to join the invited organization."
+                : "Enter your details to get started."}
             </p>
           </div>
 
@@ -201,6 +210,7 @@ export default function Register() {
                 id="email"
                 type="email"
                 placeholder="Enter your email"
+                readOnly={Boolean(invitationId)}
                 {...registerField("email")}
               />
 

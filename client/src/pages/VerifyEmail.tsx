@@ -14,7 +14,8 @@ import { Label } from "@/components/ui/label";
 
 import { useVerifyEmailMutation } from "../services/authApi";
 import { useDispatch } from "react-redux";
-import { setCredentials } from "../store/authSlice";
+import { setCredentials, setSelectedOrganization } from "../store/authSlice";
+import { useAcceptOrganizationInvitationMutation } from "../services/taskApi";
 
 const verifyEmailSchema = z.object({
   otp: z
@@ -35,9 +36,12 @@ export default function VerifyEmail() {
   const dispatch = useDispatch();
 
   const email = location.state?.email;
+  const invitationId = location.state?.invitationId as string | undefined;
 
   const [verifyEmail, { isLoading }] =
     useVerifyEmailMutation();
+  const [acceptInvitation, { isLoading: isAcceptingInvitation }] =
+    useAcceptOrganizationInvitationMutation();
 
   const {
     register,
@@ -73,11 +77,28 @@ export default function VerifyEmail() {
       dispatch(
         setCredentials({
           user: response.user,
-          token: response.token,
         })
       );
 
-      navigate("/dashboard");
+      if (invitationId) {
+        try {
+          const invitationResponse = await acceptInvitation(invitationId).unwrap();
+          dispatch(setSelectedOrganization({
+            _id: invitationResponse.organization._id,
+            org_id: invitationResponse.organization.org_id,
+            org_name: invitationResponse.organization.org_name,
+          }));
+          navigate("/dashboard", { replace: true });
+          return;
+        } catch {
+          navigate("/settings/organization", { replace: true });
+          return;
+        }
+      }
+
+      // Organization selection redirects to the workspace when one exists,
+      // or displays the create-organization form when the user has none.
+      navigate("/organizations", { replace: true });
     } catch (error: any) {
       console.error(
         "OTP verification failed:",
@@ -147,10 +168,10 @@ export default function VerifyEmail() {
           <Button
             type="submit"
             className="w-full"
-            disabled={isLoading}
+            disabled={isLoading || isAcceptingInvitation}
           >
-            {isLoading
-              ? "Verifying..."
+            {isLoading || isAcceptingInvitation
+              ? isAcceptingInvitation ? "Joining organization..." : "Verifying..."
               : "Verify Email"}
           </Button>
 

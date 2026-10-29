@@ -1,3 +1,4 @@
+
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
 
 export interface AuthUser {
@@ -6,20 +7,56 @@ export interface AuthUser {
   email: string;
 }
 
+export interface LoginResponse {
+  message: string;
+  token: string;
+  user: AuthUser;
+}
+
+interface MessageResponse {
+  message: string;
+}
+
+interface VerifyEmailResponse extends MessageResponse {
+  token: string;
+  user: AuthUser;
+}
+
+interface EmailRequest {
+  email: string;
+}
+
+interface VerifyEmailRequest {
+  email: string;
+  otp: string;
+}
+
+interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+interface ResetPasswordRequest {
+  email: string;
+  otp: string;
+  newPassword: string;
+}
+
 export const authApi = createApi({
-  //This gives our API service a name.
   reducerPath: "authApi",
 
-  //This is the common URL of our authentication backend.
   baseQuery: fetchBaseQuery({
     baseUrl: "http://localhost:5000/api/auth",
     credentials: "include",
   }),
 
-  endpoints: (builder) => ({
+  tagTypes: ["Auth"],
 
-    //Register API
-    register: builder.mutation({
+  endpoints: (builder) => ({
+    register: builder.mutation<
+      MessageResponse,
+      { name: string; email: string; password: string; confirmPassword: string }
+    >({
       query: (data) => ({
         url: "/register",
         method: "POST",
@@ -27,64 +64,69 @@ export const authApi = createApi({
       }),
     }),
 
-    //Verify email API
-    verifyEmail: builder.mutation({
+    verifyEmail: builder.mutation<
+      VerifyEmailResponse,
+      VerifyEmailRequest
+    >({
       query: (data) => ({
         url: "/verify-email",
         method: "POST",
         body: data,
       }),
+      invalidatesTags: ["Auth"],
     }),
 
-    //Login API
-    login: builder.mutation({
+    login: builder.mutation<LoginResponse, LoginRequest>({
       query: (data) => ({
         url: "/login",
         method: "POST",
         body: data,
       }),
+      invalidatesTags: ["Auth"],
     }),
 
-    // Restore the current session from the HttpOnly cookie.
     getCurrentUser: builder.query<{ user: AuthUser }, void>({
       query: () => "/me",
+      providesTags: ["Auth"],
     }),
 
-    // Clear the server-side authentication cookie.
-    logout: builder.mutation<{ message: string }, void>({
+    logout: builder.mutation<MessageResponse, void>({
       query: () => ({
         url: "/logout",
         method: "POST",
       }),
+      invalidatesTags: ["Auth"],
     }),
 
-    //Resend OTP API
-    resendOTP: builder.mutation({
+    resendOTP: builder.mutation<MessageResponse, EmailRequest>({
       query: (data) => ({
         url: "/resend-otp",
         method: "POST",
         body: data,
       }),
     }),
-    forgotPassword: builder.mutation({
-  query: (data) => ({
-    url: "/forgot-password",
-    method: "POST",
-    body: data,
-  }),
-}),
 
-resetPassword: builder.mutation({
-  query: (data) => ({
-    url: "/reset-password",
-    method: "POST",
-    body: data,
-  }),
-}),
+    forgotPassword: builder.mutation<MessageResponse, EmailRequest>({
+      query: (data) => ({
+        url: "/forgot-password",
+        method: "POST",
+        body: data,
+      }),
+    }),
+
+    resetPassword: builder.mutation<
+      MessageResponse,
+      ResetPasswordRequest
+    >({
+      query: (data) => ({
+        url: "/reset-password",
+        method: "POST",
+        body: data,
+      }),
+    }),
   }),
 });
 
-//These hooks will be used inside our React pages.
 export const {
   useRegisterMutation,
   useVerifyEmailMutation,

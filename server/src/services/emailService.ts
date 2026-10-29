@@ -33,3 +33,34 @@ export const sendOTPEmail = async (
     `,
   });
 };
+
+export const sendOrganizationInvitationEmail = async (
+  email: string,
+  organizationName: string,
+  role: string,
+  invitationId: string
+) => {
+  const registrationUrl = new URL(
+    "/register",
+    process.env.CLIENT_URL || "http://localhost:5173"
+  );
+  registrationUrl.searchParams.set("invitationId", invitationId);
+  registrationUrl.searchParams.set("email", email);
+  const safeRegistrationUrl = registrationUrl.toString()
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;");
+  const safeOrganizationName = organizationName
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+
+  await transporter.sendMail({
+    from: process.env.EMAIL_USER,
+    to: email,
+    subject: `Invitation to join ${organizationName} on Sprintly`,
+    text: `You have been invited to join ${organizationName} on Sprintly as a ${role}. Register using the invited email address and accept the invitation here: ${registrationUrl.toString()}`,
+    html: `<p>You have been invited to join <strong>${safeOrganizationName}</strong> on Sprintly as a <strong>${role}</strong>.</p><p><a href="${safeRegistrationUrl}">Register and join the organization</a></p>`,
+  });
+};

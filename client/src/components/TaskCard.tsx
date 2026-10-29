@@ -47,10 +47,6 @@ interface TaskCardProps {
       name: string;
       email: string;
     } | string | null;
-    project?: {
-      _id: string;
-      name: string;
-    } | string | null;
     dueDate?: string;
   };
 
@@ -101,12 +97,6 @@ function TaskCard({
       ? task.assignee
       : null;
 
-  // Get the project only when the API returns a project object
-  const project =
-    typeof task.project === "object" && task.project !== null
-      ? task.project
-      : null;
-
   return (
     <article className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition hover:border-indigo-300 hover:shadow-md">
 
@@ -143,11 +133,6 @@ function TaskCard({
         </span>
       </div>
 
-      {/* Project name */}
-      <p className="mb-3 text-xs text-gray-600">
-        Project: {project?.name ?? "Project unavailable"}
-      </p>
-
       {/* Assignee name */}
       <div className="mb-3 flex items-center gap-2 border-t border-gray-100 pt-3">
         <CircleUserRound size={20} className="text-gray-500" />
@@ -178,7 +163,7 @@ function TaskCard({
 
 
       {/* Change task status */}
-      <div className="relative">
+      <div className="relative mt-3">
         <select
           value={task.status}
           aria-label={`Status for ${task.title}`}

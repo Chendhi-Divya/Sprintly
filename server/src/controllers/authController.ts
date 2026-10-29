@@ -1,20 +1,20 @@
+
 import { type Request, type Response } from "express";
 import bcrypt from "bcryptjs";
 
 import User from "../models/User.js";
+import PendingUser from "../models/PendingUser.js";
 
-
-import { 
+import {
   registerSchema,
   verifyOTPSchema,
   loginSchema,
   resendOTPSchema,
- 
 } from "../schemas/authSchema.js";
+
 import { generateOTP } from "../utils/generateOTP.js";
 import { sendOTPEmail } from "../services/emailService.js";
 import { generateToken } from "../utils/generateToken.js";
-import PendingUser from "../models/PendingUser.js";
 
 const authCookieSameSite: "none" | "lax" =
   process.env.NODE_ENV === "production" ? "none" : "lax";
@@ -27,83 +27,41 @@ const authCookieOptions = {
   maxAge: 7 * 24 * 60 * 60 * 1000,
 };
 
-
-export const forgotPassword = async (req: any, res: any) => {
-  try {
-    const { email } = req.body;
-
-    const user = await User.findOne({ email }).select("+password");
-
-    if (!user) {
-      return res.status(404).json({
-        message: "User not found",
-      });
-    }
-
-    const otp = generateOTP();
-
-    const otpExpiresAt = new Date(
-      Date.now() + 10 * 60 * 1000
-    );
-
-    await PendingUser.findOneAndUpdate(
-      { email },
-      {
-        email,
-        otp,
-        otpExpiresAt,
-      },
-      {
-        upsert: true,
-      }
-    );
-
-    await sendOTPEmail(email, otp);
-
-    res.status(200).json({
-      message: "OTP sent to your email",
-    });
-
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      message: "Something went wrong",
-    });
-  }
+type AuthenticatedRequest = Request & {
+  userId?: string;
 };
 
+const getPublicUser = (user: {
+  _id: { toString(): string };
+  name: string;
+  email: string;
+}) => ({
+  id: user._id.toString(),
+  name: user.name,
+  email: user.email,
+});
 
-
-export const registerUser = async (
-  req: Request,
-  res: Response
-) => {
+// Register: save the user in PendingUser until OTP verification.
+export const registerUser = async (req: Request, res: Response) => {
   try {
     const result = registerSchema.safeParse(req.body);
+
     if (!result.success) {
       const fieldErrors: Record<string, string[]> = {};
 
       for (const issue of result.error.issues) {
-        const field = issue.path[0] as string;
-
-        if (!fieldErrors[field]) {
-          fieldErrors[field] = [];
+        const field = String(issue.path[0] ?? "general");
+        fieldErrors[field] ??= [];
+        fieldErrors[field].push(issue.message);
       }
 
-    fieldErrors[field].push(issue.message);
-  }
+      return res.status(400).json({
+        message: "Please correct the following errors",
+        fieldErrors,
+      });
+    }
 
-  return res.status(400).json({
-    message: "Please correct the following errors",
-    fieldErrors,
-  });
-}
-    const {
-      name,
-      email,
-      password,
-    } = result.data;
+    const { name, email, password } = result.data;
 
     const existingUser = await User.findOne({ email });
 
@@ -114,12 +72,8 @@ export const registerUser = async (
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-
     const otp = generateOTP();
-
-    const otpExpiresAt = new Date(
-      Date.now() + 10 * 60 * 1000
-    );
+    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
     await PendingUser.findOneAndDelete({ email });
 
@@ -145,80 +99,70 @@ export const registerUser = async (
   }
 };
 
-//verify OTP
-
-export const verifyEmailOTP = async (
-  req: Request,
-  res: Response
-) => {
-  try{
+// Verify OTP and create the permanent user.
+export const verifyEmailOTP = async (req: Request, res: Response) => {
+  try {
     const result = verifyOTPSchema.safeParse(req.body);
-    
-    if(!result.success){
+
+    if (!result.success) {
       return res.status(400).json({
         message: "Validation failed",
         errors: result.error.flatten(),
       });
     }
 
-    const {email,otp}=result.data;
+    const { email, otp } = result.data;
+    const pendingUser = await PendingUser.findOne({ email });
 
-    const pendingUser=await PendingUser.findOne({email});
-
-    if(!pendingUser){
+    if (!pendingUser) {
       return res.status(404).json({
         message: "No pending registration found for this email.",
       });
     }
 
-    if(pendingUser.otp!==otp){
+    if (pendingUser.otp !== otp) {
       return res.status(400).json({
         message: "Invalid OTP.",
       });
     }
 
-    if(pendingUser.otpExpiresAt < new Date()){
-      await PendingUser.findOneAndDelete({email});
+    if (pendingUser.otpExpiresAt < new Date()) {
+      await PendingUser.findOneAndDelete({ email });
+
       return res.status(400).json({
         message: "OTP has expired. Please register again.",
       });
     }
 
-    const newUser=await User.create({
+    const newUser = await User.create({
       name: pendingUser.name,
       email: pendingUser.email,
       password: pendingUser.password,
-      isVerified:true,
+      isVerified: true,
     });
 
-    await PendingUser.findOneAndDelete({email});
+    await PendingUser.findOneAndDelete({ email });
 
-    const token=generateToken(newUser._id.toString());
+    const token = generateToken(newUser._id.toString());
+
     res.cookie("token", token, authCookieOptions);
 
     return res.status(200).json({
       message: "Email verified and user registered successfully.",
-      user: {
-        id: newUser._id.toString(),
-        name: newUser.name,
-        email: newUser.email,
-      },
-
+      token,
+      user: getPublicUser(newUser),
     });
+  } catch (error) {
+    console.error("Verify OTP error:", error);
 
-  } catch(error){
-    console.log("Verify OTP error:",error);
     return res.status(500).json({
       message: "Server error",
     });
   }
 };
 
-
-export const loginUser = async (
-  req: Request,
-  res: Response
-) => {
+// Log in without automatically creating an organization.
+export const loginUser = async (req: Request, res: Response) => {
   try {
     const result = loginSchema.safeParse(req.body);
 
@@ -230,7 +174,6 @@ export const loginUser = async (
     }
 
     const { email, password } = result.data;
-
     const user = await User.findOne({ email }).select("+password");
 
     if (!user) {
@@ -241,7 +184,8 @@ export const loginUser = async (
 
     if (!user.isVerified) {
       return res.status(403).json({
-        message: "Email not verified. Please verify your email before logging in.",
+        message:
+          "Email not verified. Please verify your email before logging in.",
       });
     }
 
@@ -262,11 +206,8 @@ export const loginUser = async (
 
     return res.status(200).json({
       message: "Login successful",
-      user: {
-        id: user._id.toString(),
-        name: user.name,
-        email: user.email,
-      },
+      token,
+      user: getPublicUser(user),
     });
   } catch (error) {
     console.error("Login error:", error);
@@ -277,12 +218,9 @@ export const loginUser = async (
   }
 };
 
-export const logoutUser = async (
-  
-  _req: Request,
-  res: Response
-) => {
-  try{
+// Logout.
+export const logoutUser = async (_req: Request, res: Response) => {
+  try {
     res.clearCookie("token", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -293,98 +231,152 @@ export const logoutUser = async (
     return res.status(200).json({
       message: "User logged out successfully.",
     });
-  } catch(error){
-    console.log("Logout error:",error);
+  } catch (error) {
+    console.error("Logout error:", error);
+
     return res.status(500).json({
       message: "Server error",
     });
   }
 };
 
+// Get the authenticated user.
 export const getCurrentUser = async (
-  req: Request & { userId?: string },
+  req: AuthenticatedRequest,
   res: Response
 ) => {
   try {
+    if (!req.userId) {
+      return res.status(401).json({
+        message: "Authentication required",
+      });
+    }
+
     const user = await User.findById(req.userId).select("name email");
 
     if (!user) {
-      return res.status(401).json({ message: "User not found" });
+      return res.status(401).json({
+        message: "User not found",
+      });
     }
 
     return res.status(200).json({
-      user: {
-        id: user._id.toString(),
-        name: user.name,
-        email: user.email,
-      },
+      user: getPublicUser(user),
     });
   } catch (error) {
     console.error("Current user error:", error);
-    return res.status(500).json({ message: "Server error" });
+
+    return res.status(500).json({
+      message: "Server error",
+    });
   }
 };
 
-
-//resend OTP
-export const resendOTP = async (
-
-  req: Request,
-  res: Response
-) => {
-  try{
-
+// Resend registration OTP.
+export const resendOTP = async (req: Request, res: Response) => {
+  try {
     const result = resendOTPSchema.safeParse(req.body);
 
     if (!result.success) {
       return res.status(400).json({
-        message: "validation failed",
+        message: "Validation failed",
         errors: result.error.flatten(),
       });
     }
 
-    const { email } =result.data;
+    const { email } = result.data;
+    const pendingUser = await PendingUser.findOne({ email });
 
-    const pendingUser=await PendingUser.findOne({email});
-
-    if(!pendingUser){
+    if (!pendingUser) {
       return res.status(404).json({
         message: "No pending registration found for this email.",
       });
     }
 
-    const otp=generateOTP();
-
-    const otpExpiresAt=new Date(Date.now()+10*60*1000);
-
-    pendingUser.otp=otp;
-    pendingUser.otpExpiresAt=otpExpiresAt;
+    pendingUser.otp = generateOTP();
+    pendingUser.otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
     await pendingUser.save();
+    await sendOTPEmail(email, pendingUser.otp);
 
-    await sendOTPEmail(email,otp);
-    
     return res.status(200).json({
       message: "New OTP sent to your email.",
-      });
+    });
+  } catch (error) {
+    console.error("Resend OTP error:", error);
 
-    } catch(error){
-      console.log ("Resend OTP error:",error);
-      return res.status(500).json({
-        message: "Server error",
+    return res.status(500).json({
+      message: "Server error",
+    });
+  }
+};
+
+// Request a password-reset OTP.
+export const forgotPassword = async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+
+    if (typeof email !== "string" || !email.trim()) {
+      return res.status(400).json({
+        message: "Email is required",
       });
     }
-  };
-  
 
-  export const resetPassword = async (
-  req: Request,
-  res: Response
-) => {
+    const normalizedEmail = email.trim();
+    const user = await User.findOne({ email: normalizedEmail });
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    const otp = generateOTP();
+    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    await PendingUser.findOneAndUpdate(
+      { email: normalizedEmail },
+      { email: normalizedEmail, otp, otpExpiresAt },
+      { upsert: true, setDefaultsOnInsert: true }
+    );
+
+    await sendOTPEmail(normalizedEmail, otp);
+
+    return res.status(200).json({
+      message: "OTP sent to your email",
+    });
+  } catch (error) {
+    console.error("Forgot password error:", error);
+
+    return res.status(500).json({
+      message: "Something went wrong",
+    });
+  }
+};
+
+// Reset password using OTP.
+export const resetPassword = async (req: Request, res: Response) => {
   try {
     const { email, otp, newPassword } = req.body;
 
-    const pendingUser = await PendingUser.findOne({ email });
+    if (
+      typeof email !== "string" ||
+      typeof otp !== "string" ||
+      typeof newPassword !== "string" ||
+      !email.trim() ||
+      !otp.trim() ||
+      newPassword.length < 8
+    ) {
+      return res.status(400).json({
+        message:
+          "Please provide a valid email, OTP, and password of at least 8 characters.",
+      });
+    }
+
+    const normalizedEmail = email.trim();
+    const pendingUser = await PendingUser.findOne({
+      email: normalizedEmail,
+    });
 
     if (!pendingUser) {
       return res.status(404).json({
@@ -399,7 +391,7 @@ export const resendOTP = async (
     }
 
     if (pendingUser.otpExpiresAt < new Date()) {
-      await PendingUser.findOneAndDelete({ email });
+      await PendingUser.findOneAndDelete({ email: normalizedEmail });
 
       return res.status(400).json({
         message: "OTP has expired. Please request a new OTP.",
@@ -408,18 +400,25 @@ export const resendOTP = async (
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    await User.findOneAndUpdate(
-      { email },
-      { password: hashedPassword }
+    const updatedUser = await User.findOneAndUpdate(
+      { email: normalizedEmail },
+      { password: hashedPassword },
+      { new: true }
     );
 
-    await PendingUser.findOneAndDelete({ email });
+    if (!updatedUser) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    await PendingUser.findOneAndDelete({ email: normalizedEmail });
 
     return res.status(200).json({
       message: "Password reset successfully.",
     });
   } catch (error) {
-    console.log("Reset password error:", error);
+    console.error("Reset password error:", error);
 
     return res.status(500).json({
       message: "Server error",
