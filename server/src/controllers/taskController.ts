@@ -7,6 +7,11 @@ import TaskCounter from "../models/taskCounter.js";
 import Notification from "../models/Notification.js";
 import Organization from "../models/Organization.js";
 
+// Escape special characters before using user input in a regular expression.
+const escapeRegex = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Check whether the assignee belongs to the project's organization.
 async function assigneeBelongsToProjectOrganization(
   organizationValue: string,
   assigneeId: string
@@ -18,6 +23,7 @@ async function assigneeBelongsToProjectOrganization(
       ? [{ _id: organizationValue }]
       : []),
   ];
+
   const organization = await Organization.findOne({
     $or: organizationMatch,
     members: assigneeId,
@@ -26,56 +32,110 @@ async function assigneeBelongsToProjectOrganization(
   return Boolean(organization);
 }
 
-async function ensureProjectTaskKeys(project: IProject): Promise<void> {
-  if (!project.key) {
-    const words = project.name.trim().split(/\s+/).filter(Boolean);
-    const baseKey = (words.length > 1
+// Generate a fallback project key for older projects that do not have one.
+async function generateFallbackProjectKey(
+  project: IProject
+): Promise<string> {
+  const words = project.name.trim().split(/\s+/).filter(Boolean);
+
+  const baseKey = (
+    words.length > 1
       ? words.map((word) => word[0]).join("")
-      : words[0] ?? "PRJ")
-      .replace(/[^a-zA-Z0-9]/g, "")
-      .toUpperCase()
-      .slice(0, 4);
-    let key = baseKey.length >= 2 ? baseKey : "PRJ";
-    let suffix = 2;
+      : words[0] ?? "PRJ"
+  )
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toUpperCase()
+    .slice(0, 4);
 
-    while (await Project.exists({ key, _id: { $ne: project._id } })) {
-      key = `${baseKey.slice(0, 6)}${suffix}`;
-      suffix += 1;
-    }
+  const safeBaseKey = baseKey.length >= 2 ? baseKey : "PRJ";
 
-    project.key = key;
+  let key = safeBaseKey;
+  let suffix = 2;
+
+  while (
+    await Project.exists({
+      key,
+      _id: { $ne: project._id },
+    })
+  ) {
+    key = `${safeBaseKey.slice(0, 6)}${suffix}`;
+    suffix += 1;
+  }
+
+  return key;
+}
+
+// Make sure existing tasks have project-based keys and the counter is correct.
+async function ensureProjectTaskKeys(project: IProject): Promise<void> {
+  // Older projects may not have a project key.
+  if (!project.key) {
+    project.key = await generateFallbackProjectKey(project);
     await project.save();
   }
 
-  const projectTasks = await Task.find({ project: project._id })
-    .sort({ createdAt: 1, _id: 1 });
-  const expectedKeys = projectTasks.map(
-    (_task, index) => `${project.key}-${String(index + 1).padStart(2, "0")}`
+  const projectKey = project.key;
+
+  const projectTasks = await Task.find({
+    project: project._id,
+  }).sort({
+    createdAt: 1,
+    _id: 1,
+  });
+
+  const taskKeyPattern = new RegExp(
+    `^${escapeRegex(projectKey)}-\\d+$`
   );
 
-  if (projectTasks.every((task, index) => task.taskKey === expectedKeys[index])) {
-    await TaskCounter.updateOne(
-      { _id: project._id.toString() },
-      { $set: { seq: projectTasks.length } },
-      { upsert: true }
-    );
-    return;
+  // Check whether any task still has an old type-based key.
+  const hasLegacyKeys = projectTasks.some(
+    (task) => !task.taskKey || !taskKeyPattern.test(task.taskKey)
+  );
+
+  if (hasLegacyKeys) {
+    // Temporarily change old keys to avoid conflicts with the unique index.
+    for (const task of projectTasks) {
+      task.taskKey = `MIG-${task._id.toString()}`;
+      await task.save();
+    }
+
+    // Assign sequential project-based keys.
+    for (const [index, task] of projectTasks.entries()) {
+      task.taskKey = `${projectKey}-${String(index + 1).padStart(2, "0")}`;
+      await task.save();
+    }
   }
 
-  // Move old type-based keys out of the way before assigning project-based keys.
+  // Find the highest task number currently assigned to this project.
+  // This preserves gaps when a task has been deleted.
+  let highestTaskNumber = 0;
+
   for (const task of projectTasks) {
-    task.taskKey = `MIG-${task._id.toString()}`;
-    await task.save();
+    const match = task.taskKey?.match(taskKeyPattern);
+
+    if (match) {
+      const taskNumber = Number(match[0].split("-").pop());
+
+      if (Number.isFinite(taskNumber)) {
+        highestTaskNumber = Math.max(highestTaskNumber, taskNumber);
+      }
+    }
   }
 
-  for (const [index, task] of projectTasks.entries()) {
-    task.taskKey = expectedKeys[index]!;
-    await task.save();
-  }
+  // Never decrease an existing counter.
+  const existingCounter = await TaskCounter.findById(
+    project._id.toString()
+  );
+
+  const currentSequence = existingCounter?.seq ?? 0;
+
+  const nextSequence = Math.max(
+    currentSequence,
+    highestTaskNumber
+  );
 
   await TaskCounter.updateOne(
     { _id: project._id.toString() },
-    { $set: { seq: projectTasks.length } },
+    { $set: { seq: nextSequence } },
     { upsert: true }
   );
 }
@@ -94,7 +154,13 @@ export const createTask = async (req: Request, res: Response) => {
       parentTask,
     } = req.body;
 
-    if (!title || !type || !project) {
+    if (
+      !title ||
+      typeof title !== "string" ||
+      !title.trim() ||
+      !type ||
+      !project
+    ) {
       return res.status(400).json({
         message: "Title, type, and project are required",
       });
@@ -108,6 +174,45 @@ export const createTask = async (req: Request, res: Response) => {
       });
     }
 
+    if (!mongoose.isValidObjectId(project)) {
+      return res.status(400).json({
+        message: "Invalid project ID",
+      });
+    }
+
+    const allowedTypes = [
+      "Epic",
+      "Story",
+      "Task",
+      "Bug",
+      "Sub-task",
+    ];
+
+    const allowedPriorities = [
+      "Low",
+      "Medium",
+      "High",
+      "Urgent",
+    ];
+
+    if (!allowedTypes.includes(type)) {
+      return res.status(400).json({
+        message: "Invalid task type",
+        allowedTypes,
+      });
+    }
+
+    if (
+      priority !== undefined &&
+      priority !== null &&
+      !allowedPriorities.includes(priority)
+    ) {
+      return res.status(400).json({
+        message: "Invalid task priority",
+        allowedPriorities,
+      });
+    }
+
     const existingProject = await Project.findById(project);
 
     if (!existingProject) {
@@ -116,7 +221,7 @@ export const createTask = async (req: Request, res: Response) => {
       });
     }
 
-    // Check project membership.
+    // The creator must be a member of the project.
     const isMember = existingProject.members.some(
       (memberId) => memberId.toString() === userId.toString()
     );
@@ -127,8 +232,14 @@ export const createTask = async (req: Request, res: Response) => {
       });
     }
 
-    // Check assignee membership.
+    // Validate the assignee.
     if (assignee) {
+      if (!mongoose.isValidObjectId(assignee)) {
+        return res.status(400).json({
+          message: "Invalid assignee ID",
+        });
+      }
+
       const isAssigneeMember = existingProject.members.some(
         (memberId) => memberId.toString() === assignee.toString()
       );
@@ -152,8 +263,14 @@ export const createTask = async (req: Request, res: Response) => {
       }
     }
 
-    // Check parent task.
+    // Validate the parent task.
     if (parentTask) {
+      if (!mongoose.isValidObjectId(parentTask)) {
+        return res.status(400).json({
+          message: "Invalid parent task ID",
+        });
+      }
+
       const parent = await Task.findById(parentTask);
 
       if (!parent) {
@@ -169,43 +286,44 @@ export const createTask = async (req: Request, res: Response) => {
       }
     }
 
-    // Generate a readable task key within this project (for example DIV-01).
-    if (!existingProject.key) {
-      const words = existingProject.name.trim().split(/\s+/).filter(Boolean);
-      const rawKey = (words.length > 1
-        ? words.map((word) => word[0]).join("")
-        : words[0] ?? "PRJ")
-        .replace(/[^a-zA-Z0-9]/g, "")
-        .toUpperCase()
-        .slice(0, 4);
-      existingProject.key = rawKey.length >= 2 ? rawKey : "PRJ";
-      await existingProject.save();
-    }
+    // Synchronize existing task keys and the project counter.
+    await ensureProjectTaskKeys(existingProject);
 
+    // Increment the counter for this project only.
     const counter = await TaskCounter.findOneAndUpdate(
       { _id: existingProject._id.toString() },
       { $inc: { seq: 1 } },
-      { new: true, upsert: true }
+      {
+        new: true,
+        upsert: true,
+        setDefaultsOnInsert: true,
+      }
     );
 
-    const taskKey = `${existingProject.key}-${String(counter.seq).padStart(2, "0")}`;
+    if (!counter) {
+      throw new Error("Unable to generate task number");
+    }
 
-    // Save the task.
+    const taskKey = `${existingProject.key}-${String(
+      counter.seq
+    ).padStart(2, "0")}`;
+
+    // Create the task.
     const task = await Task.create({
       taskKey,
-      title,
+      title: title.trim(),
       description,
       type,
       priority,
-      project,
+      project: existingProject._id,
       organization: existingProject.organization,
       reporter: userId,
       assignee: assignee || undefined,
-      dueDate,
+      dueDate: dueDate || undefined,
       parentTask: parentTask || undefined,
     });
 
-    // Notify the assignee when a task is created.
+    // Notify the assignee when another user creates the task.
     if (assignee && assignee.toString() !== userId.toString()) {
       try {
         await Notification.create({
@@ -224,7 +342,7 @@ export const createTask = async (req: Request, res: Response) => {
     }
 
     const populatedTask = await Task.findById(task._id)
-      .populate("project", "name")
+      .populate("project", "name key")
       .populate("assignee", "name email")
       .populate("reporter", "name email")
       .populate("parentTask", "title taskKey");
@@ -235,6 +353,16 @@ export const createTask = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("CREATE TASK ERROR:", error);
+
+    if (
+      error instanceof Error &&
+      error.name === "ValidationError"
+    ) {
+      return res.status(400).json({
+        message: "Task validation failed",
+        error: error.message,
+      });
+    }
 
     return res.status(500).json({
       message: "Failed to create task",
@@ -273,18 +401,22 @@ export const getTasks = async (req: Request, res: Response) => {
     const pageLimit = Math.min(limit, 100);
     const skip = (page - 1) * pageLimit;
 
-    // Include all tasks in projects the user belongs to, not only tasks they
-    // reported or were assigned. Project membership is the access boundary.
-    const userProjects = await Project.find({ members: userId });
-    const userProjectIds = userProjects.map((project) => project._id);
+    // Find all projects where the user is a member.
+    const userProjects = await Project.find({
+      members: userId,
+    });
 
-    const filter: any = {
+    const userProjectIds = userProjects.map(
+      (project) => project._id
+    );
+
+    const filter: Record<string, any> = {
       project: { $in: userProjectIds },
     };
 
     if (typeof search === "string" && search.trim()) {
       filter.title = {
-        $regex: search.trim(),
+        $regex: escapeRegex(search.trim()),
         $options: "i",
       };
     }
@@ -298,6 +430,12 @@ export const getTasks = async (req: Request, res: Response) => {
     }
 
     if (typeof assignee === "string" && assignee.trim()) {
+      if (!mongoose.isValidObjectId(assignee)) {
+        return res.status(400).json({
+          message: "Invalid assignee ID",
+        });
+      }
+
       filter.assignee = assignee;
     }
 
@@ -305,8 +443,7 @@ export const getTasks = async (req: Request, res: Response) => {
       filter.type = type;
     }
 
-    // Replace legacy type-based keys (for example STORY-006) with stable,
-    // project-based keys that increase across every task type (for example DIV-01).
+    // Migrate old task keys and synchronize each project's counter.
     for (const project of userProjects) {
       await ensureProjectTaskKeys(project);
     }
@@ -314,7 +451,7 @@ export const getTasks = async (req: Request, res: Response) => {
     const totalTasks = await Task.countDocuments(filter);
 
     const tasks = await Task.find(filter)
-      .populate("project", "name")
+      .populate("project", "name key")
       .populate("assignee", "name email")
       .populate("reporter", "name email")
       .populate("parentTask", "title taskKey")
@@ -350,8 +487,16 @@ export const getTasks = async (req: Request, res: Response) => {
 // GET ONE TASK
 export const getTaskById = async (req: Request, res: Response) => {
   try {
-    const task = await Task.findById(req.params.id)
-      .populate("project", "name")
+    const { id } = req.params;
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({
+        message: "Invalid task ID",
+      });
+    }
+
+    const task = await Task.findById(id)
+      .populate("project", "name key")
       .populate("assignee", "name email")
       .populate("reporter", "name email")
       .populate("parentTask", "title taskKey");
@@ -380,6 +525,7 @@ export const getTaskById = async (req: Request, res: Response) => {
 export const updateTask = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+
     const {
       title,
       description,
@@ -395,6 +541,12 @@ export const updateTask = async (req: Request, res: Response) => {
     if (!userId) {
       return res.status(401).json({
         message: "User is not authenticated",
+      });
+    }
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({
+        message: "Invalid task ID",
       });
     }
 
@@ -416,6 +568,7 @@ export const updateTask = async (req: Request, res: Response) => {
       });
     }
 
+    // Only project members can update its tasks.
     const isMember = project.members.some(
       (memberId) => memberId.toString() === userId.toString()
     );
@@ -448,14 +601,20 @@ export const updateTask = async (req: Request, res: Response) => {
       "Urgent",
     ];
 
-    if (status !== undefined && !allowedStatuses.includes(status)) {
+    if (
+      status !== undefined &&
+      !allowedStatuses.includes(status)
+    ) {
       return res.status(400).json({
         message: "Invalid task status",
         allowedStatuses,
       });
     }
 
-    if (type !== undefined && !allowedTypes.includes(type)) {
+    if (
+      type !== undefined &&
+      !allowedTypes.includes(type)
+    ) {
       return res.status(400).json({
         message: "Invalid task type",
         allowedTypes,
@@ -473,7 +632,17 @@ export const updateTask = async (req: Request, res: Response) => {
     }
 
     // Validate the new assignee.
-    if (assignee !== undefined && assignee !== null && assignee !== "") {
+    if (
+      assignee !== undefined &&
+      assignee !== null &&
+      assignee !== ""
+    ) {
+      if (!mongoose.isValidObjectId(assignee)) {
+        return res.status(400).json({
+          message: "Invalid assignee ID",
+        });
+      }
+
       const isAssigneeMember = project.members.some(
         (memberId) => memberId.toString() === assignee.toString()
       );
@@ -497,11 +666,31 @@ export const updateTask = async (req: Request, res: Response) => {
       }
     }
 
-    if (title !== undefined) task.title = title;
-    if (description !== undefined) task.description = description;
-    if (type !== undefined) task.type = type;
-    if (status !== undefined) task.status = status;
-    if (priority !== undefined) task.priority = priority;
+    if (title !== undefined) {
+      if (typeof title !== "string" || !title.trim()) {
+        return res.status(400).json({
+          message: "Task title cannot be empty",
+        });
+      }
+
+      task.title = title.trim();
+    }
+
+    if (description !== undefined) {
+      task.description = description;
+    }
+
+    if (type !== undefined) {
+      task.type = type;
+    }
+
+    if (status !== undefined) {
+      task.status = status;
+    }
+
+    if (priority !== undefined) {
+      task.priority = priority;
+    }
 
     if (assignee !== undefined) {
       if (assignee === null || assignee === "") {
@@ -542,7 +731,7 @@ export const updateTask = async (req: Request, res: Response) => {
     }
 
     const updatedTask = await Task.findById(task._id)
-      .populate("project", "name")
+      .populate("project", "name key")
       .populate("assignee", "name email")
       .populate("reporter", "name email")
       .populate("parentTask", "title taskKey");
@@ -575,6 +764,7 @@ export const updateTask = async (req: Request, res: Response) => {
 export const deleteTask = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).userId;
+    const { id } = req.params;
 
     if (!userId) {
       return res.status(401).json({
@@ -582,7 +772,13 @@ export const deleteTask = async (req: Request, res: Response) => {
       });
     }
 
-    const task = await Task.findById(req.params.id);
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({
+        message: "Invalid task ID",
+      });
+    }
+
+    const task = await Task.findById(id);
 
     if (!task) {
       return res.status(404).json({
@@ -609,6 +805,9 @@ export const deleteTask = async (req: Request, res: Response) => {
     }
 
     await Task.findByIdAndDelete(task._id);
+
+    // Do not decrement the counter.
+    // This prevents a deleted task's issue key from being reused.
 
     return res.status(200).json({
       message: "Task deleted successfully",

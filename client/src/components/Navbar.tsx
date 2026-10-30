@@ -5,7 +5,6 @@ import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import {
   Search,
-  Plus,
   Bell,
   UserRound,
   CheckCheck,
@@ -101,7 +100,6 @@ export default function Navbar({
   const [errorMessage, setErrorMessage] = useState("");
   const [notificationError, setNotificationError] = useState("");
 
-  // Refs are used to detect clicks outside these dropdowns.
   const profileRef = useRef<HTMLDivElement>(null);
   const notificationsRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
@@ -111,8 +109,13 @@ export default function Navbar({
   const selectedOrganization = useSelector(
     (state: RootState) => state.auth.selectedOrganization
   );
+
   const organizationId =
-    selectedOrganization?.org_id || selectedOrganization?._id || "";
+    selectedOrganization?.org_id ||
+    selectedOrganization?._id ||
+    "";
+
+  const organizationName = selectedOrganization?.org_name ?? "";
 
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -166,8 +169,6 @@ export default function Navbar({
     (project) => project._id === projectId
   );
 
-  const organizationName = selectedOrganization?.org_name ?? "";
-
   const {
     data: membersData,
     isLoading: isLoadingMembers,
@@ -191,7 +192,7 @@ export default function Navbar({
 
   const unreadCount = notificationsData?.unreadCount ?? 0;
 
-  // Close dropdowns when clicking anywhere outside them.
+  // Close dropdowns when clicking outside them.
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       const target = event.target;
@@ -212,7 +213,10 @@ export default function Navbar({
         setShowNotifications(false);
       }
 
-      if (settingsRef.current && !settingsRef.current.contains(target)) {
+      if (
+        settingsRef.current &&
+        !settingsRef.current.contains(target)
+      ) {
         setShowSettingsMenu(false);
       }
     }
@@ -223,6 +227,37 @@ export default function Navbar({
       document.removeEventListener(
         "mousedown",
         handleClickOutside
+      );
+    };
+  }, []);
+
+  // Listen for the Create Task button in ProjectHeader.
+  useEffect(() => {
+    function handleOpenCreateTask() {
+      setTitle("");
+      setDescription("");
+      setType("Task");
+      setPriority("Medium");
+      setAssignee("");
+      setParentTask("");
+      setDueDate("");
+      setErrorMessage("");
+
+      setShowCreateForm(true);
+      setShowProfileMenu(false);
+      setShowNotifications(false);
+      setShowSettingsMenu(false);
+    }
+
+    window.addEventListener(
+      "sprintly:open-create-task",
+      handleOpenCreateTask
+    );
+
+    return () => {
+      window.removeEventListener(
+        "sprintly:open-create-task",
+        handleOpenCreateTask
       );
     };
   }, []);
@@ -243,13 +278,7 @@ export default function Navbar({
     setErrorMessage("");
   }
 
-  function handleCreate() {
-    resetForm();
-    setShowCreateForm(true);
-    setShowProfileMenu(false);
-    setShowNotifications(false);
-    setShowSettingsMenu(false);
-  }
+ 
 
   async function handleLogout() {
     try {
@@ -362,11 +391,44 @@ export default function Navbar({
 
     setShowNotifications(willOpen);
     setShowProfileMenu(false);
+    setShowSettingsMenu(false);
     setNotificationError("");
 
     if (willOpen) {
       void refetchNotifications();
     }
+  }
+
+  function handleSettingsToggle() {
+    const willOpen = !showSettingsMenu;
+
+    setShowSettingsMenu(willOpen);
+    setSettingsSearch("");
+    setShowProfileMenu(false);
+    setShowNotifications(false);
+  }
+
+  function openOrganizationSettings(section: "General" | "Members") {
+    setShowSettingsMenu(false);
+    setShowProfileMenu(false);
+
+    navigate("/settings/organization", {
+      state: { section },
+    });
+  }
+
+  function openProjectSettings() {
+    setShowSettingsMenu(false);
+    setShowProfileMenu(false);
+
+    if (selectedProject) {
+      navigate(`/projects/${selectedProject._id}/settings`);
+      return;
+    }
+
+    navigate("/settings/organization", {
+      state: { section: "Project settings" },
+    });
   }
 
   const cannotCreate =
@@ -388,9 +450,42 @@ export default function Navbar({
     parentTaskPlaceholder = "No existing tasks in this project";
   }
 
+  const settingsItems = [
+    {
+      label: "General settings",
+      description: "Edit the organization name",
+      icon: Building2,
+      onClick: () => openOrganizationSettings("General"),
+    },
+    {
+      label: "Members and invitations",
+      description: "Invite people and manage organization members",
+      icon: UsersRound,
+      onClick: () => openOrganizationSettings("Members"),
+    },
+    {
+      label: "Project settings",
+      description: "Edit project name, issue key, access, and workflow",
+      icon: FolderKanban,
+      onClick: openProjectSettings,
+    },
+  ];
+
+  const filteredSettings = settingsItems.filter((item) => {
+    const query = settingsSearch.trim().toLowerCase();
+
+    return (
+      !query ||
+      `${item.label} ${item.description}`
+        .toLowerCase()
+        .includes(query)
+    );
+  });
+
   return (
     <>
       <nav className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-200 bg-white px-5 py-3">
+        {/* Logo and organization */}
         <div className="flex min-w-0 shrink-0 items-center gap-2">
           <div className="rounded-lg bg-blue-600 p-2 text-white">
             <CheckCheck size={21} />
@@ -416,6 +511,7 @@ export default function Navbar({
           )}
         </div>
 
+        {/* Search */}
         <div className="flex items-center gap-2">
           <div className="flex w-56 items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 focus-within:border-blue-500">
             <Search
@@ -434,17 +530,9 @@ export default function Navbar({
               aria-label="Search tasks"
             />
           </div>
-
-          <button
-            type="button"
-            onClick={handleCreate}
-            className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
-          >
-            <Plus size={17} />
-            Create
-          </button>
         </div>
 
+        {/* Notifications, settings, and profile */}
         <div className="flex shrink-0 items-center gap-4">
           {/* Notifications dropdown */}
           <div ref={notificationsRef} className="relative">
@@ -599,16 +687,16 @@ export default function Navbar({
             )}
           </div>
 
-          <div className="relative" ref={settingsRef}>
+          {/* Settings dropdown */}
+          <div ref={settingsRef} className="relative">
             <button
               type="button"
-              onClick={() => {
-                setShowSettingsMenu((open) => !open);
-                setSettingsSearch("");
-                setShowProfileMenu(false);
-                setShowNotifications(false);
-              }}
-              className={`inline-flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium transition ${showSettingsMenu ? "bg-gray-100 text-blue-700" : "text-gray-600 hover:bg-gray-100 hover:text-blue-700"}`}
+              onClick={handleSettingsToggle}
+              className={`inline-flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium transition ${
+                showSettingsMenu
+                  ? "bg-gray-100 text-blue-700"
+                  : "text-gray-600 hover:bg-gray-100 hover:text-blue-700"
+              }`}
               aria-label="Open settings menu"
               aria-expanded={showSettingsMenu}
             >
@@ -617,77 +705,70 @@ export default function Navbar({
             </button>
 
             {showSettingsMenu && (
-              <div className="absolute right-0 top-full z-[60] mt-2 max-h-[min(80vh,680px)] w-[min(510px,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl">
+              <div className="absolute right-0 top-full z-[60] mt-2 max-h-[min(80vh,680px)] w-[min(360px,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl">
                 <div className="border-b border-gray-100 p-4">
-                  <h2 className="text-sm font-semibold text-gray-900">Settings</h2>
+                  <h2 className="text-sm font-semibold text-gray-900">
+                    Settings
+                  </h2>
+
                   <div className="mt-3 flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 focus-within:border-blue-500">
-                    <Search size={16} className="shrink-0 text-gray-400" />
+                    <Search
+                      size={16}
+                      className="shrink-0 text-gray-400"
+                    />
+
                     <input
-                      autoFocus
+                      type="search"
                       value={settingsSearch}
-                      onChange={(event) => setSettingsSearch(event.target.value)}
-                      placeholder="Search settings"
+                      onChange={(event) =>
+                        setSettingsSearch(event.target.value)
+                      }
+                      placeholder="Search settings..."
                       aria-label="Search settings"
                       className="w-full bg-transparent text-sm outline-none"
                     />
-                    <kbd className="hidden whitespace-nowrap rounded border border-gray-200 px-1.5 py-0.5 text-[10px] text-gray-400 sm:inline">⌘ K</kbd>
                   </div>
                 </div>
+
                 <div className="max-h-[calc(min(80vh,680px)-90px)] overflow-y-auto p-2">
-                  {(() => {
-                    const query = settingsSearch.trim().toLowerCase();
-                    const menuItems = [
-                      {
-                        group: "Organization settings",
-                        items: [
-                          { label: "General settings", description: "Edit the organization name", icon: Building2, path: "/settings/organization", state: { section: "General" } },
-                          { label: "Members and invitations", description: "Invite people and manage organization members", icon: UsersRound, path: "/settings/organization", state: { section: "Members" } },
-                        ],
-                      },
-                      {
-                        group: "Project settings",
-                        items: selectedProject ? [
-                          { label: "Project settings", description: "Edit project name, issue key, access, and workflow", icon: FolderKanban, path: `/projects/${selectedProject._id}/settings`, state: undefined },
-                        ] : [],
-                      },
-                    ].map((group) => ({
-                      ...group,
-                      items: group.items.filter((item) =>
-                        !query || `${group.group} ${item.label} ${item.description}`.toLowerCase().includes(query)
-                      ),
-                    })).filter((group) => group.items.length > 0);
+                  {filteredSettings.length === 0 ? (
+                    <p className="px-3 py-8 text-center text-sm text-gray-500">
+                      No settings found.
+                    </p>
+                  ) : (
+                    filteredSettings.map((item) => {
+                      const Icon = item.icon;
 
-                    if (menuItems.length === 0) {
-                      return <p className="px-3 py-8 text-center text-sm text-gray-500">No settings found.</p>;
-                    }
+                      return (
+                        <button
+                          key={item.label}
+                          type="button"
+                          onClick={item.onClick}
+                          className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left transition hover:bg-gray-50"
+                        >
+                          <Icon
+                            size={19}
+                            className="shrink-0 text-gray-500"
+                          />
 
-                    return menuItems.map((group) => (
-                      <section key={group.group} className="py-2">
-                        <h3 className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">{group.group}</h3>
-                        {group.items.map((item) => {
-                          const Icon = item.icon;
-                          return (
-                            <button
-                              key={item.label}
-                              type="button"
-                              onClick={() => {
-                                setShowSettingsMenu(false);
-                                navigate(item.path, { state: item.state });
-                              }}
-                              className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-gray-50"
-                            >
-                              <Icon size={19} className="shrink-0 text-gray-500" />
-                              <span className="min-w-0 flex-1">
-                                <span className="block text-sm font-medium text-gray-800">{item.label}</span>
-                                <span className="mt-0.5 block truncate text-xs text-gray-500">{item.description}</span>
-                              </span>
-                              <ChevronRight size={16} className="shrink-0 text-gray-400" />
-                            </button>
-                          );
-                        })}
-                      </section>
-                    ));
-                  })()}
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-medium text-gray-800">
+                              {item.label}
+                            </span>
+
+                            <span className="mt-0.5 block text-xs text-gray-500">
+                              {item.description}
+                            </span>
+                          </span>
+
+                          <ChevronRight
+                            size={16}
+                            className="shrink-0 text-gray-400"
+                          />
+                        </button>
+                      );
+                    })
+                  )}
                 </div>
               </div>
             )}
@@ -702,6 +783,7 @@ export default function Navbar({
               onClick={() => {
                 setShowProfileMenu((open) => !open);
                 setShowNotifications(false);
+                setShowSettingsMenu(false);
               }}
               className="flex items-center gap-2 rounded-full bg-gray-100 py-1.5 pl-2 pr-3 text-sm font-medium text-gray-700 hover:bg-gray-200"
             >
@@ -725,18 +807,6 @@ export default function Navbar({
                     </p>
                   )}
                 </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowProfileMenu(false);
-                    navigate("/settings/organization");
-                  }}
-                  className="mt-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
-                >
-                  <Settings size={16} />
-                  Organization settings
-                </button>
 
                 <button
                   type="button"
@@ -811,9 +881,7 @@ export default function Navbar({
                 <input
                   id="task-title"
                   value={title}
-                  onChange={(event) =>
-                    setTitle(event.target.value)
-                  }
+                  onChange={(event) => setTitle(event.target.value)}
                   placeholder="Enter task title"
                   required
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
@@ -899,9 +967,7 @@ export default function Navbar({
                   id="dueDate"
                   type="date"
                   value={dueDate}
-                  onChange={(event) =>
-                    setDueDate(event.target.value)
-                  }
+                  onChange={(event) => setDueDate(event.target.value)}
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900"
                 />
               </div>
@@ -917,9 +983,7 @@ export default function Navbar({
                 <select
                   id="task-assignee"
                   value={assignee}
-                  onChange={(event) =>
-                    setAssignee(event.target.value)
-                  }
+                  onChange={(event) => setAssignee(event.target.value)}
                   disabled={
                     !projectId ||
                     isLoadingMembers ||

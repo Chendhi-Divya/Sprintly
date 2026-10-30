@@ -1,4 +1,3 @@
-
 import { Routes, Route } from "react-router-dom";
 import type { ComponentType } from "react";
 
@@ -23,19 +22,16 @@ const RegisterPage = Register as unknown as ComponentType;
 function App() {
   return (
     <Routes>
+      {/* Public routes */}
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/login" element={<Login />} />
       <Route path="/verify-email" element={<VerifyEmail />} />
-
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
 
       {/* Protected routes */}
       <Route element={<ProtectedRoute />}>
-        <Route
-          path="/organizations"
-          element={<Organizations />}
-        />
+        <Route path="/organizations" element={<Organizations />} />
 
         <Route
           path="/organizations/create"

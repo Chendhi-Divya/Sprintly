@@ -1,7 +1,11 @@
 
 import mongoose, { Schema, Document } from "mongoose";
 
-export type OrganizationRole = "Owner" | "Admin" | "Member" | "Viewer";
+export type OrganizationRole =
+  | "Owner"
+  | "Admin"
+  | "Member"
+  | "Viewer";
 
 export interface IOrganizationMembership {
   user: mongoose.Types.ObjectId;
@@ -14,9 +18,18 @@ interface IOrganization extends Document {
   description?: string;
   logoUrl?: string;
   slug?: string;
+
+  // Current organization owner.
   admin: mongoose.Types.ObjectId;
+
+  // Original organization creator.
+  createdBy?: mongoose.Types.ObjectId;
+
   members: mongoose.Types.ObjectId[];
   memberships: IOrganizationMembership[];
+
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 const membershipSchema = new Schema<IOrganizationMembership>(
@@ -26,6 +39,7 @@ const membershipSchema = new Schema<IOrganizationMembership>(
       ref: "User",
       required: true,
     },
+
     role: {
       type: String,
       enum: ["Owner", "Admin", "Member", "Viewer"],
@@ -72,13 +86,22 @@ const organizationSchema = new Schema<IOrganization>(
       sparse: true,
     },
 
+    // Current organization owner.
     admin: {
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
     },
 
-    // Keep this field while existing controllers use it.
+    // User who originally created the organization.
+    // Optional to support existing organization records.
+    createdBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: undefined,
+    },
+
+    // All organization members.
     members: [
       {
         type: Schema.Types.ObjectId,
@@ -86,7 +109,7 @@ const organizationSchema = new Schema<IOrganization>(
       },
     ],
 
-    // Role assigned to each user in this organisation.
+    // Role assigned to each organization member.
     memberships: {
       type: [membershipSchema],
       default: [],

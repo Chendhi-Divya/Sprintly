@@ -37,6 +37,8 @@ export default function TaskBoard({
     useUpdateTaskMutation();
 
   const [message, setMessage] = useState("");
+  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
+  const [dragOverStatus, setDragOverStatus] = useState<TaskStatus | null>(null);
 
   // Get tasks belonging to the selected project.
   const tasks = useMemo(() => {
@@ -250,7 +252,32 @@ export default function TaskBoard({
             return (
               <section
                 key={status}
-                className="min-h-80 rounded-xl border bg-gray-50 p-3"
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  setDragOverStatus(status);
+                }}
+                onDragLeave={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                    setDragOverStatus(null);
+                  }
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const taskId = event.dataTransfer.getData("text/plain") || draggedTaskId;
+                  const task = tasks.find((item) => item._id === taskId);
+                  setDragOverStatus(null);
+                  setDraggedTaskId(null);
+
+                  if (taskId && task?.status !== status) {
+                    void handleStatusChange(taskId, status);
+                  }
+                }}
+                className={`min-h-80 rounded-xl border p-3 transition-colors ${
+                  dragOverStatus === status
+                    ? "border-blue-400 bg-blue-50 ring-2 ring-blue-100"
+                    : "bg-gray-50"
+                }`}
               >
                 <div className="mb-4 flex justify-between">
                   <h3 className="font-semibold">{status}</h3>
@@ -260,21 +287,38 @@ export default function TaskBoard({
                   </span>
                 </div>
 
-                <div className="space-y-3">
+                <div className="min-h-56 space-y-3">
                   {columnTasks.map((task) => (
-                    <TaskCard
+                    <div
                       key={task._id}
-                      task={{
-                        ...task,
-                        assignee:
-                          typeof task.assignee === "object" &&
-                          task.assignee !== null
-                            ? task.assignee
-                            : undefined,
+                      draggable={!isUpdatingTask}
+                      onDragStart={(event) => {
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("text/plain", task._id);
+                        setDraggedTaskId(task._id);
                       }}
-                      isUpdating={isUpdatingTask}
-                      onStatusChange={handleStatusChange}
-                    />
+                      onDragEnd={() => {
+                        setDraggedTaskId(null);
+                        setDragOverStatus(null);
+                      }}
+                      className={`cursor-grab transition-opacity active:cursor-grabbing ${
+                        draggedTaskId === task._id ? "opacity-40" : ""
+                      }`}
+                      aria-label={`Drag ${task.title} to another status column`}
+                    >
+                      <TaskCard
+                        task={{
+                          ...task,
+                          assignee:
+                            typeof task.assignee === "object" &&
+                            task.assignee !== null
+                              ? task.assignee
+                              : undefined,
+                        }}
+                        isUpdating={isUpdatingTask}
+                        onStatusChange={handleStatusChange}
+                      />
+                    </div>
                   ))}
 
                   {columnTasks.length === 0 && (

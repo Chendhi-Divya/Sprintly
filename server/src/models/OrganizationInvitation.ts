@@ -1,3 +1,4 @@
+
 import mongoose, { Schema, type Document } from "mongoose";
 import type { OrganizationRole } from "./Organization.js";
 
@@ -6,6 +7,8 @@ export interface IOrganizationInvitation extends Document {
   email: string;
   role: OrganizationRole;
   invitedBy: mongoose.Types.ObjectId;
+  tokenHash?: string;
+  expiresAt: Date;
   createdAt: Date;
 }
 
@@ -22,6 +25,12 @@ const invitationSchema = new Schema<IOrganizationInvitation>(
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
+    },
+    tokenHash: { type: String, sparse: true, unique: true, select: false },
+    expiresAt: {
+      type: Date,
+      required: true,
+      index: true,
     },
   },
   { timestamps: true, versionKey: false }

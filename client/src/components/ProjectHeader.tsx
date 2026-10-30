@@ -12,7 +12,6 @@ import {
   Check,
   X,
   Plus,
-  Settings,
 } from "lucide-react";
 
 import {
@@ -149,7 +148,12 @@ export default function ProjectHeader({
     });
   }
 
-  // Reusable dropdown styling with a consistently positioned arrow.
+  function handleCreateTask() {
+    window.dispatchEvent(
+      new Event("sprintly:open-create-task")
+    );
+  }
+
   const selectClassName =
     "w-full appearance-none rounded-lg border border-gray-300 bg-white py-2 pl-3 pr-10 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
 
@@ -211,35 +215,14 @@ export default function ProjectHeader({
             </button>
           </div>
         ) : projects.length === 0 ? (
-          <div className="flex flex-wrap items-center gap-3">
-            <div>
-              <p className="font-medium text-gray-900">
-                No projects yet
-              </p>
-              <p className="text-sm text-gray-500">
-                {selectedOrganization?.org_name ?? "This organization"} has no projects.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => navigate("/projects/create")}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
-            >
-              <Plus size={16} />
-              Create project
-            </button>
-
-            {selectedProject && (
-              <button
-                type="button"
-                onClick={() => navigate(`/projects/${selectedProject._id}/settings`)}
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
-              >
-                <Settings size={16} />
-                Settings
-              </button>
-            )}
+          <div>
+            <p className="font-medium text-gray-900">
+              No projects yet
+            </p>
+            <p className="text-sm text-gray-500">
+              {selectedOrganization?.org_name ?? "This organization"} has no projects.
+              Create one from Organization Settings.
+            </p>
           </div>
         ) : (
           <div className="relative flex flex-wrap items-center gap-2">
@@ -262,15 +245,6 @@ export default function ProjectHeader({
                   isProjectDropdownOpen ? "rotate-180" : ""
                 }`}
               />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => navigate("/projects/create")}
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
-            >
-              <Plus size={16} />
-              Create project
             </button>
 
             {isProjectDropdownOpen && (
@@ -318,7 +292,7 @@ export default function ProjectHeader({
         )}
       </div>
 
-      {/* View tabs, search and filters */}
+      {/* View tabs, search, filters and create task */}
       <div className="flex flex-wrap items-center gap-4 border-t border-gray-100 px-4 py-3 sm:px-6">
         <div className="flex shrink-0 items-center gap-5">
           {(["List", "Board"] as const).map((tab) => {
@@ -496,6 +470,17 @@ export default function ProjectHeader({
             </>
           )}
         </div>
+
+        {/* Create Task */}
+        <button
+          type="button"
+          onClick={handleCreateTask}
+          disabled={!selectedProjectId}
+          className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Plus size={17} />
+          Create task
+        </button>
       </div>
     </div>
   );

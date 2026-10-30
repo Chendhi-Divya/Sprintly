@@ -1,32 +1,37 @@
 
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
 
-// Task types
-export type TaskStatus = "To Do" | "In Progress" | "In Review" | "Done";
+// ==========================================
+// TASK TYPES
+// ==========================================
+
+export type TaskStatus =
+  | "To Do"
+  | "In Progress"
+  | "In Review"
+  | "Done";
+
 export type TaskType = "Epic" | "Story" | "Task" | "Bug";
 export type TaskPriority = "Low" | "Medium" | "High";
 
-// User assigned to a task
 export interface TaskUser {
   _id: string;
   name: string;
   email: string;
 }
 
-// Project information
 export interface TaskProject {
   _id: string;
   name: string;
+  key?: string;
 }
 
-// Parent task information
 export interface ParentTask {
   _id: string;
   title: string;
   taskKey?: string;
 }
 
-// Task information
 export interface Task {
   _id: string;
   taskKey?: string;
@@ -43,7 +48,6 @@ export interface Task {
   project?: TaskProject | string | null;
 }
 
-// Task API responses
 export interface TasksResponse {
   message?: string;
   count?: number;
@@ -84,69 +88,45 @@ export interface CreateTaskResponse {
   task: Task;
 }
 
-// Project and organization information
+// ==========================================
+// PROJECT TYPES
+// ==========================================
+
+export interface ProjectUser {
+  _id: string;
+  name?: string;
+  email?: string;
+}
+
 export interface Project {
   _id: string;
   name: string;
   key?: string;
   description?: string;
-  organization?: string;
+  organization?:
+    | string
+    | {
+        _id?: string;
+        org_id?: string;
+      };
   organizationName?: string;
-  owner?: string | TaskUser;
-  members?: (string | TaskUser)[];
+  owner?: string | ProjectUser | null;
+  members?: string[];
   createdAt?: string;
 }
 
-export interface Organization {
-  _id: string;
-  org_id: string;
-  org_name: string;
-  description?: string;
-  logoUrl?: string;
-  slug?: string;
-  createdAt?: string;
-}
-
-export type OrganizationRole = "Owner" | "Admin" | "Member" | "Viewer";
-
-export interface OrganizationMembership {
-  user: string | TaskUser;
-  role: OrganizationRole;
-}
-
-export interface OrganizationWithMembers extends Organization {
-  admin: string | TaskUser;
-  members: (string | TaskUser)[];
-  memberships: OrganizationMembership[];
-}
-
-export interface OrganizationInvitation {
-  _id: string;
-  email: string;
-  role: OrganizationRole;
-  createdAt: string;
-  organization?: { org_id: string; org_name: string } | null;
+export interface ProjectResponse {
+  message?: string;
+  project: Project;
 }
 
 export interface ProjectsResponse {
   projects: Project[];
 }
 
-export interface OrganizationsResponse {
-  organizations: Organization[];
-}
-
-export interface CreateOrganizationResponse {
-  message: string;
-  organization: Organization;
-}
-
-export interface CreateOrganizationRequest {
-  org_name: string;
-}
-
 export interface CreateProjectRequest {
   name: string;
+  key: string;
   description?: string;
   organization: string;
 }
@@ -156,15 +136,14 @@ export interface CreateProjectResponse {
   project: Project;
 }
 
-export interface OrganizationResponse {
-  organization: OrganizationWithMembers;
+export interface UpdateProjectRequest {
+  id: string;
+  name: string;
+  key: string;
+  description: string;
+  ownerId?: string;
 }
 
-export interface OrganizationInvitationsResponse {
-  invitations: OrganizationInvitation[];
-}
-
-// Project members
 export interface ProjectMember {
   _id: string;
   name: string;
@@ -176,7 +155,146 @@ export interface ProjectMembersResponse {
   members: ProjectMember[];
 }
 
-// Notification information
+export interface ProjectMemberActionRequest {
+  id: string;
+  userId: string;
+}
+
+export interface RemoveProjectMemberRequest {
+  id: string;
+  memberId: string;
+}
+
+export interface ProjectMemberActionResponse {
+  message: string;
+  project?: Project;
+  members?: ProjectMember[];
+}
+
+// ==========================================
+// ORGANIZATION TYPES
+// ==========================================
+
+export type OrganizationRole =
+  | "Owner"
+  | "Admin"
+  | "Member"
+  | "Viewer";
+
+export interface OrganizationMembership {
+  user: string | ProjectUser;
+  role: OrganizationRole;
+}
+
+export interface Organization {
+  _id: string;
+  org_id: string;
+  org_name: string;
+  admin?: string | ProjectUser | null;
+  members?: Array<string | ProjectUser>;
+  memberships?: OrganizationMembership[];
+  description?: string;
+  logoUrl?: string;
+  slug?: string;
+}
+
+export interface OrganizationResponse {
+  message?: string;
+  organization: Organization;
+}
+
+export interface OrganizationsResponse {
+  organizations: Organization[];
+}
+
+export interface CreateOrganizationRequest {
+  org_name: string;
+}
+
+export interface CreateOrganizationResponse {
+  message: string;
+  organization: Organization;
+}
+
+export interface CreateOrganizationWithFirstProjectRequest {
+  org_name: string;
+  project_name: string;
+  project_description: string;
+  issue_key: string;
+}
+
+export interface CreateOrganizationWithFirstProjectResponse {
+  message: string;
+  organization: Organization;
+  project: Project;
+}
+
+// ==========================================
+// ORGANIZATION INVITATION TYPES
+// ==========================================
+
+export interface OrganizationInvitation {
+  _id: string;
+  email: string;
+  role: OrganizationRole;
+  createdAt: string;
+  organization?: {
+    _id?: string;
+    org_id?: string;
+    org_name?: string;
+  };
+}
+
+export interface OrganizationInvitationsResponse {
+  invitations: OrganizationInvitation[];
+}
+
+export interface UpdateOrganizationRequest {
+  orgId: string;
+  org_name: string;
+}
+
+export interface UpdateOrganizationResponse {
+  message: string;
+  organization: Organization;
+}
+
+export interface CreateOrganizationInvitationRequest {
+  orgId: string;
+  email: string;
+  role: OrganizationRole;
+}
+
+export interface CreateOrganizationInvitationResponse {
+  message: string;
+  invitation: OrganizationInvitation;
+  emailSent: boolean;
+}
+
+export interface AcceptOrganizationInvitationByTokenRequest {
+  token: string;
+}
+
+export interface UpdateOrganizationMemberRoleRequest {
+  orgId: string;
+  memberId: string;
+  role: OrganizationRole;
+}
+
+export interface RemoveOrganizationMemberRequest {
+  orgId: string;
+  memberId: string;
+}
+
+export interface RevokeOrganizationInvitationRequest {
+  orgId: string;
+  invitationId: string;
+}
+
+// ==========================================
+// NOTIFICATION TYPES
+// ==========================================
+
 export interface SprintlyNotification {
   _id: string;
   recipient: string;
@@ -191,22 +309,26 @@ export interface SprintlyNotification {
   updatedAt: string;
 }
 
-export interface NotificationsResponse {
-  message: string;
-  notifications: SprintlyNotification[];
-  unreadCount: number;
-}
-
 export interface NotificationResponse {
   message: string;
   notification?: SprintlyNotification;
   modifiedCount?: number;
 }
 
+export interface NotificationsResponse {
+  message: string;
+  notifications: SprintlyNotification[];
+  unreadCount: number;
+}
+
 export interface NotificationActionRequest {
   id?: string;
   organizationId: string;
 }
+
+// ==========================================
+// RTK QUERY API
+// ==========================================
 
 export const taskApi = createApi({
   reducerPath: "taskApi",
@@ -219,14 +341,16 @@ export const taskApi = createApi({
   tagTypes: [
     "Tasks",
     "Projects",
+    "ProjectMembers",
     "Notifications",
     "Organizations",
-    "OrganizationInvitations",
-    "ProjectMembers",
   ],
 
   endpoints: (builder) => ({
-    // Tasks
+    // ======================================
+    // TASK ENDPOINTS
+    // ======================================
+
     getTasks: builder.query<TasksResponse, void>({
       query: () => "/tasks",
       providesTags: ["Tasks"],
@@ -256,10 +380,18 @@ export const taskApi = createApi({
       invalidatesTags: ["Tasks", "Notifications"],
     }),
 
-    // Projects
+    // ======================================
+    // PROJECT ENDPOINTS
+    // ======================================
+
     getProjects: builder.query<ProjectsResponse, string>({
       query: (organizationId) =>
         `/projects?organizationId=${encodeURIComponent(organizationId)}`,
+      providesTags: ["Projects"],
+    }),
+
+    getProjectById: builder.query<ProjectResponse, string>({
+      query: (projectId) => `/projects/${projectId}`,
       providesTags: ["Projects"],
     }),
 
@@ -275,26 +407,49 @@ export const taskApi = createApi({
       invalidatesTags: ["Projects"],
     }),
 
-    getProjectById: builder.query<{ project: Project }, string>({
-      query: (projectId) => `/projects/${projectId}`,
-      providesTags: (_result, _error, id) => [{ type: "Projects", id }],
-    }),
-
     updateProject: builder.mutation<
-      { message: string; project: Project },
-      { id: string; name: string; description: string; key?: string }
+      ProjectResponse,
+      UpdateProjectRequest
     >({
       query: ({ id, ...body }) => ({
         url: `/projects/${id}`,
         method: "PUT",
         body,
       }),
-      invalidatesTags: ["Projects", "Tasks"],
+      invalidatesTags: [
+        "Projects",
+        "Tasks",
+        "ProjectMembers",
+      ],
+    }),
+
+    // DELETE PROJECT
+    deleteProject: builder.mutation<
+      { message: string },
+      string
+    >({
+      query: (projectId) => ({
+        url: `/projects/${projectId}`,
+        method: "DELETE",
+      }),
+      invalidatesTags: [
+        "Projects",
+        "Tasks",
+        "ProjectMembers",
+      ],
+    }),
+
+    getProjectMembers: builder.query<
+      ProjectMembersResponse,
+      string
+    >({
+      query: (projectId) => `/projects/${projectId}/members`,
+      providesTags: ["ProjectMembers"],
     }),
 
     addProjectMember: builder.mutation<
-      { message: string },
-      { id: string; userId: string }
+      ProjectMemberActionResponse,
+      ProjectMemberActionRequest
     >({
       query: ({ id, userId }) => ({
         url: `/projects/${id}/members`,
@@ -305,19 +460,37 @@ export const taskApi = createApi({
     }),
 
     removeProjectMember: builder.mutation<
-      { message: string },
-      { id: string; memberId: string }
+      ProjectMemberActionResponse,
+      RemoveProjectMemberRequest
     >({
       query: ({ id, memberId }) => ({
         url: `/projects/${id}/members/${memberId}`,
         method: "DELETE",
       }),
-      invalidatesTags: ["Projects", "ProjectMembers"],
+      invalidatesTags: [
+        "Projects",
+        "ProjectMembers",
+        "Tasks",
+      ],
     }),
 
-    // Organizations
-    getOrganizations: builder.query<OrganizationsResponse, void>({
+    // ======================================
+    // ORGANIZATION ENDPOINTS
+    // ======================================
+
+    getOrganizations: builder.query<
+      OrganizationsResponse,
+      void
+    >({
       query: () => "/organizations",
+      providesTags: ["Organizations"],
+    }),
+
+    getOrganizationById: builder.query<
+      OrganizationResponse,
+      string
+    >({
+      query: (orgId) => `/organizations/${orgId}`,
       providesTags: ["Organizations"],
     }),
 
@@ -333,29 +506,107 @@ export const taskApi = createApi({
       invalidatesTags: ["Organizations"],
     }),
 
-    getOrganizationById: builder.query<OrganizationResponse, string>({
-      query: (orgId) => `/organizations/${encodeURIComponent(orgId)}`,
-      providesTags: (_result, _error, id) => [{ type: "Organizations", id }],
+    createOrganizationWithFirstProject: builder.mutation<
+      CreateOrganizationWithFirstProjectResponse,
+      CreateOrganizationWithFirstProjectRequest
+    >({
+      query: (body) => ({
+        url: "/organizations/setup",
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["Organizations", "Projects"],
     }),
 
     updateOrganization: builder.mutation<
-      OrganizationResponse,
-      { orgId: string; org_name: string; description?: string; logoUrl?: string; slug?: string }
+      UpdateOrganizationResponse,
+      UpdateOrganizationRequest
     >({
       query: ({ orgId, ...body }) => ({
-        url: `/organizations/${encodeURIComponent(orgId)}`,
+        url: `/organizations/${orgId}`,
         method: "PATCH",
         body,
       }),
       invalidatesTags: ["Organizations"],
     }),
 
-    updateOrganizationMemberRole: builder.mutation<
+    // ======================================
+    // ORGANIZATION INVITATIONS
+    // ======================================
+
+    getMyOrganizationInvitations: builder.query<
+      OrganizationInvitationsResponse,
+      void
+    >({
+      query: () => "/organizations/invitations",
+      providesTags: ["Organizations"],
+    }),
+
+    getOrganizationInvitations: builder.query<
+      OrganizationInvitationsResponse,
+      string
+    >({
+      query: (orgId) =>
+        `/organizations/${orgId}/invitations`,
+      providesTags: ["Organizations"],
+    }),
+
+    createOrganizationInvitation: builder.mutation<
+      CreateOrganizationInvitationResponse,
+      CreateOrganizationInvitationRequest
+    >({
+      query: ({ orgId, ...body }) => ({
+        url: `/organizations/${orgId}/invitations`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["Organizations"],
+    }),
+
+    acceptOrganizationInvitation: builder.mutation<
+      UpdateOrganizationResponse,
+      string
+    >({
+      query: (invitationId) => ({
+        url: `/organizations/invitations/${invitationId}/accept`,
+        method: "PATCH",
+      }),
+      invalidatesTags: ["Organizations", "Projects"],
+    }),
+
+    acceptOrganizationInvitationByToken: builder.mutation<
+      OrganizationResponse,
+      AcceptOrganizationInvitationByTokenRequest
+    >({
+      query: (body) => ({
+        url: "/organizations/invitations/accept-token",
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["Organizations", "Projects"],
+    }),
+
+    revokeOrganizationInvitation: builder.mutation<
       { message: string },
-      { orgId: string; memberId: string; role: OrganizationRole }
+      RevokeOrganizationInvitationRequest
+    >({
+      query: ({ orgId, invitationId }) => ({
+        url: `/organizations/${orgId}/invitations/${invitationId}`,
+        method: "DELETE",
+      }),
+      invalidatesTags: ["Organizations"],
+    }),
+
+    // ======================================
+    // ORGANIZATION MEMBERS
+    // ======================================
+
+    updateOrganizationMemberRole: builder.mutation<
+      UpdateOrganizationResponse,
+      UpdateOrganizationMemberRoleRequest
     >({
       query: ({ orgId, memberId, role }) => ({
-        url: `/organizations/${encodeURIComponent(orgId)}/members/${memberId}`,
+        url: `/organizations/${orgId}/members/${memberId}`,
         method: "PATCH",
         body: { role },
       }),
@@ -363,70 +614,28 @@ export const taskApi = createApi({
     }),
 
     removeOrganizationMember: builder.mutation<
-      { message: string },
-      { orgId: string; memberId: string }
+      UpdateOrganizationResponse,
+      RemoveOrganizationMemberRequest
     >({
       query: ({ orgId, memberId }) => ({
-        url: `/organizations/${encodeURIComponent(orgId)}/members/${memberId}`,
+        url: `/organizations/${orgId}/members/${memberId}`,
         method: "DELETE",
       }),
-      invalidatesTags: ["Organizations"],
+      invalidatesTags: [
+        "Organizations",
+        "Projects",
+        "ProjectMembers",
+      ],
     }),
 
-    createOrganizationInvitation: builder.mutation<
-      { message: string; invitation: OrganizationInvitation; emailSent?: boolean },
-      { orgId: string; email: string; role: OrganizationRole }
-    >({
-      query: ({ orgId, ...body }) => ({
-        url: `/organizations/${encodeURIComponent(orgId)}/invitations`,
-        method: "POST",
-        body,
-      }),
-      invalidatesTags: ["OrganizationInvitations"],
-    }),
+    // ======================================
+    // NOTIFICATION ENDPOINTS
+    // ======================================
 
-    getMyOrganizationInvitations: builder.query<OrganizationInvitationsResponse, void>({
-      query: () => "/organizations/invitations",
-      providesTags: ["OrganizationInvitations"],
-    }),
-
-    getOrganizationInvitations: builder.query<OrganizationInvitationsResponse, string>({
-      query: (orgId) => `/organizations/${encodeURIComponent(orgId)}/invitations`,
-      providesTags: ["OrganizationInvitations"],
-    }),
-
-    acceptOrganizationInvitation: builder.mutation<
-      OrganizationResponse & { message: string },
+    getNotifications: builder.query<
+      NotificationsResponse,
       string
     >({
-      query: (invitationId) => ({
-        url: `/organizations/invitations/${invitationId}/accept`,
-        method: "PATCH",
-      }),
-      invalidatesTags: ["Organizations", "OrganizationInvitations"],
-    }),
-
-    revokeOrganizationInvitation: builder.mutation<
-      { message: string },
-      { orgId: string; invitationId: string }
-    >({
-      query: ({ orgId, invitationId }) => ({
-        url: `/organizations/${encodeURIComponent(orgId)}/invitations/${invitationId}`,
-        method: "DELETE",
-      }),
-      invalidatesTags: ["OrganizationInvitations"],
-    }),
-
-    getProjectMembers: builder.query<
-      ProjectMembersResponse,
-      string
-    >({
-      query: (projectId) => `/projects/${projectId}/members`,
-      providesTags: ["ProjectMembers"],
-    }),
-
-    // Notifications
-    getNotifications: builder.query<NotificationsResponse, string>({
       query: (organizationId) =>
         `/notifications?organizationId=${encodeURIComponent(organizationId)}`,
       providesTags: ["Notifications"],
@@ -448,13 +657,18 @@ export const taskApi = createApi({
       string
     >({
       query: (organizationId) => ({
-        url: `/notifications/read-all?organizationId=${encodeURIComponent(organizationId)}`,
+        url: "/notifications/read-all?organizationId=" +
+          encodeURIComponent(organizationId),
         method: "PATCH",
       }),
       invalidatesTags: ["Notifications"],
     }),
   }),
 });
+
+// ==========================================
+// GENERATED HOOKS
+// ==========================================
 
 export const {
   // Tasks
@@ -464,26 +678,33 @@ export const {
 
   // Projects
   useGetProjectsQuery,
-  useCreateProjectMutation,
-  useGetProjectMembersQuery,
   useGetProjectByIdQuery,
+  useCreateProjectMutation,
   useUpdateProjectMutation,
+  useDeleteProjectMutation,
+  useGetProjectMembersQuery,
   useAddProjectMemberMutation,
   useRemoveProjectMemberMutation,
 
   // Organizations
   useGetOrganizationsQuery,
   useLazyGetOrganizationsQuery,
-  useCreateOrganizationMutation,
   useGetOrganizationByIdQuery,
+  useCreateOrganizationMutation,
+  useCreateOrganizationWithFirstProjectMutation,
   useUpdateOrganizationMutation,
-  useUpdateOrganizationMemberRoleMutation,
-  useRemoveOrganizationMemberMutation,
-  useCreateOrganizationInvitationMutation,
+
+  // Organization invitations
   useGetMyOrganizationInvitationsQuery,
   useGetOrganizationInvitationsQuery,
+  useCreateOrganizationInvitationMutation,
   useAcceptOrganizationInvitationMutation,
+  useAcceptOrganizationInvitationByTokenMutation,
   useRevokeOrganizationInvitationMutation,
+
+  // Organization members
+  useUpdateOrganizationMemberRoleMutation,
+  useRemoveOrganizationMemberMutation,
 
   // Notifications
   useGetNotificationsQuery,

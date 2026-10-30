@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useForm } from "react-hook-form"; //imports useForm from React Hook Form to manage the form.
 import { z } from "zod"; //imports Zod to create validation rules for the form.
 import { zodResolver } from "@hookform/resolvers/zod"; //connects Zod validation with React Hook Form.
 
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useRegisterMutation } from "../services/authApi";
 
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,10 @@ const registerSchema = z
       .regex(
         /[A-Z]/,
         "Password must contain at least one uppercase letter"
+      )
+      .regex(
+        /[a-z]/,
+        "Password must contain at least one lowercase letter"
       )
       .regex(
         /[0-9]/,
@@ -58,9 +62,19 @@ type RegisterFormData = z.infer<typeof registerSchema>;
 export default function Register() {
   //This allows us to move the user to another page.
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const invitationId = searchParams.get("invitationId") ?? "";
-  const invitedEmail = searchParams.get("email") ?? "";
+  const [inviteToken] = useState(() =>
+    new URLSearchParams(window.location.hash.slice(1)).get("invite") ?? ""
+  );
+
+  useEffect(() => {
+    if (inviteToken && window.location.hash) {
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${window.location.pathname}${window.location.search}`
+      );
+    }
+  }, [inviteToken]);
 
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -74,48 +88,43 @@ export default function Register() {
   const {
   register: registerField,
   handleSubmit,
+  watch,
   formState: { errors },
   setError,
 } = useForm<RegisterFormData>({
   resolver: zodResolver(registerSchema),
-  defaultValues: {
-    email: invitedEmail,
-  },
 });
+  const passwordValue = watch("password", "");
+  const missingPasswordRequirements = [
+    passwordValue.length >= 8 ? "" : "at least 8 characters",
+    /[A-Z]/.test(passwordValue) ? "" : "one uppercase letter",
+    /[a-z]/.test(passwordValue) ? "" : "one lowercase letter",
+    /[0-9]/.test(passwordValue) ? "" : "one number",
+    /[^A-Za-z0-9]/.test(passwordValue) ? "" : "one special character",
+  ].filter(Boolean);
 
   //This function runs after the form is successfully submitted through handleSubmit.
   const onSubmit = async (data: RegisterFormData) => {
-    console.log("Register button clicked");
-    console.log("Form data:", data);
-
     //Clear previous error message.
     setErrorMessage("");
 
     try {
       //Send the user's name, email and password to the backend.
-      const response = await registerUser({
+      await registerUser({
         name: data.name,
         email: data.email,
         password: data.password,
         confirmPassword: data.confirmPassword,
       }).unwrap();
 
-      console.log("Registration successful:", response);
-
       //After successful registration, move to the email verification page.
       navigate("/verify-email", {
         state: {
           email: data.email,
-          invitationId,
+          inviteToken,
         },
       });
   } catch (error: any) {
-  console.log(
-    "Registration error:",
-    JSON.stringify(error, null, 2)
-  );
-
-  console.log("Error data:", error?.data);
 
   if (error?.data?.fieldErrors) {
     const fieldErrors = error.data.fieldErrors;
@@ -130,10 +139,16 @@ export default function Register() {
     return;
   }
 
-  setErrorMessage(
-    error?.data?.message ||
-      "Registration failed. Please try again."
-  );
+  const message = error?.data?.message;
+  if (message) {
+    setErrorMessage(message);
+  } else if (error?.status === "FETCH_ERROR") {
+    setErrorMessage("Can't reach the server. Check your connection and try again.");
+  } else if (error?.status === "TIMEOUT_ERROR") {
+    setErrorMessage("Registration is taking too long. Please try again.");
+  } else {
+    setErrorMessage("Registration failed unexpectedly. Please try again.");
+  }
 }
   };
 
@@ -168,8 +183,8 @@ export default function Register() {
             </h2>
 
             <p className="mt-1 text-sm text-slate-500">
-              {invitationId
-                ? "Create your account to join the invited organization."
+              {inviteToken
+                ? "Create your account using the email address that received the invitation."
                 : "Enter your details to get started."}
             </p>
           </div>
@@ -210,7 +225,6 @@ export default function Register() {
                 id="email"
                 type="email"
                 placeholder="Enter your email"
-                readOnly={Boolean(invitationId)}
                 {...registerField("email")}
               />
 
@@ -259,6 +273,11 @@ export default function Register() {
               {errors.password && (
                 <p className="text-sm text-red-500">
                   {errors.password.message}
+                </p>
+              )}
+              {passwordValue.length > 0 && missingPasswordRequirements.length > 0 && (
+                <p aria-live="polite" className="text-xs leading-5 text-red-600">
+                  Password must include {missingPasswordRequirements.join(", ")}.
                 </p>
               )}
             </div>

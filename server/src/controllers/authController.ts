@@ -75,17 +75,29 @@ export const registerUser = async (req: Request, res: Response) => {
     const otp = generateOTP();
     const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-    await PendingUser.findOneAndDelete({ email });
+    await PendingUser.findOneAndUpdate(
+      { email },
+      {
+        $set: {
+          name,
+          email,
+          password: hashedPassword,
+          otp,
+          otpExpiresAt,
+        },
+      },
+      { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
+    );
 
-    await PendingUser.create({
-      name,
-      email,
-      password: hashedPassword,
-      otp,
-      otpExpiresAt,
-    });
-
-    await sendOTPEmail(email, otp);
+    try {
+      await sendOTPEmail(email, otp);
+    } catch (emailError) {
+      console.error("REGISTRATION OTP EMAIL ERROR:", emailError);
+      return res.status(503).json({
+        message: "Your details were saved, but we couldn't send the verification email. Please try again shortly.",
+        code: "VERIFICATION_EMAIL_FAILED",
+      });
+    }
 
     return res.status(201).json({
       message: "Registration successful. OTP sent to your email.",
@@ -93,8 +105,14 @@ export const registerUser = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Register error:", error);
 
+    if ((error as any)?.code === 11000) {
+      return res.status(409).json({
+        message: "An account with this email already exists. Please log in instead.",
+      });
+    }
+
     return res.status(500).json({
-      message: "Server error",
+      message: "We couldn't complete registration right now. Please try again.",
     });
   }
 };

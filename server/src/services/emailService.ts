@@ -4,7 +4,13 @@ import nodemailer from "nodemailer";
 dotenv.config();
 
 
-const transporter = nodemailer.createTransport({  //transporter is object which sends email using nodemailer
+const transporter = nodemailer.createTransport({  // Reuse SMTP connections and bound network wait time.
+  pool: true,
+  maxConnections: 2,
+  maxMessages: 100,
+  connectionTimeout: 8_000,
+  greetingTimeout: 8_000,
+  socketTimeout: 12_000,
   service: "gmail",
   auth: {
     user: process.env.EMAIL_USER,
@@ -38,14 +44,13 @@ export const sendOrganizationInvitationEmail = async (
   email: string,
   organizationName: string,
   role: string,
-  invitationId: string
+  inviteToken: string
 ) => {
   const registrationUrl = new URL(
     "/register",
     process.env.CLIENT_URL || "http://localhost:5173"
   );
-  registrationUrl.searchParams.set("invitationId", invitationId);
-  registrationUrl.searchParams.set("email", email);
+  registrationUrl.hash = new URLSearchParams({ invite: inviteToken }).toString();
   const safeRegistrationUrl = registrationUrl.toString()
     .replaceAll("&", "&amp;")
     .replaceAll('"', "&quot;");

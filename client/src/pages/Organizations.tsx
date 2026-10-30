@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDispatch } from "react-redux";
 import { Building2 } from "lucide-react";
@@ -36,25 +36,15 @@ export default function Organizations() {
 
   const organizations = data?.organizations ?? [];
 
-  // Automatically select an organization only when exactly one exists.
-  useEffect(() => {
-    if (organizations.length !== 1) {
-      return;
-    }
-
-    dispatch(setSelectedOrganization(organizations[0]));
-    navigate("/dashboard", { replace: true });
-  }, [organizations, dispatch, navigate]);
-
-  // Select an existing organization.
+  // Select an existing organization and open project creation.
   const handleSelectOrganization = (
     organization: (typeof organizations)[number]
   ) => {
     dispatch(setSelectedOrganization(organization));
-    navigate("/dashboard");
+    navigate("/projects/create");
   };
 
-  // Create an organization only after form submission.
+  // Create an organization.
   const handleCreateOrganization = async (
     event: React.FormEvent<HTMLFormElement>
   ) => {
@@ -74,7 +64,9 @@ export default function Organizations() {
       }).unwrap();
 
       dispatch(setSelectedOrganization(response.organization));
-      navigate("/dashboard", { replace: true });
+
+      // After creating an organization, open first project creation.
+      navigate("/projects/create", { replace: true });
     } catch (error: any) {
       setErrorMessage(
         error?.data?.message || "Failed to create organization."
@@ -82,7 +74,7 @@ export default function Organizations() {
     }
   };
 
-  // Loading state
+  // Loading state.
   if (isLoading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-background">
@@ -93,7 +85,7 @@ export default function Organizations() {
     );
   }
 
-  // Error state
+  // Error state.
   if (isError) {
     const message =
       "data" in (error ?? {})
@@ -158,7 +150,7 @@ export default function Organizations() {
                 onChange={(event) =>
                   setOrganizationName(event.target.value)
                 }
-                placeholder="e.g. Riktam Technologies"
+                placeholder="Enter organization name"
                 maxLength={100}
                 required
                 disabled={isCreating}
@@ -186,7 +178,7 @@ export default function Organizations() {
     );
   }
 
-  // Multiple organizations: show the chooser.
+  // One or multiple organizations: show the organization chooser.
   return (
     <main className="min-h-screen bg-background px-4 py-10">
       <div className="mx-auto max-w-2xl space-y-6 pt-6">
