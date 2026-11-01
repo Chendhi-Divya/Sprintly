@@ -43,6 +43,7 @@ const initialState: AuthState = {
 const authSlice = createSlice({
   name: "auth",
   initialState,
+
   reducers: {
     setCredentials: (
       state,
@@ -52,11 +53,26 @@ const authSlice = createSlice({
       localStorage.setItem("user", JSON.stringify(action.payload.user));
     },
 
+    updateUser: (
+      state,
+      action: PayloadAction<Partial<User>>
+    ) => {
+      if (state.user) {
+        state.user = {
+          ...state.user,
+          ...action.payload,
+        };
+
+        localStorage.setItem("user", JSON.stringify(state.user));
+      }
+    },
+
     setSelectedOrganization: (
       state,
       action: PayloadAction<Organization>
     ) => {
       state.selectedOrganization = action.payload;
+
       localStorage.setItem(
         "selectedOrganization",
         JSON.stringify(action.payload)
@@ -66,6 +82,7 @@ const authSlice = createSlice({
     logout: (state) => {
       state.user = null;
       state.selectedOrganization = null;
+
       localStorage.removeItem("user");
       localStorage.removeItem("selectedOrganization");
     },
@@ -74,6 +91,7 @@ const authSlice = createSlice({
 
 export const {
   setCredentials,
+  updateUser,
   setSelectedOrganization,
   logout,
 } = authSlice.actions;

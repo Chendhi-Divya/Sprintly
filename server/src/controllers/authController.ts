@@ -443,3 +443,60 @@ export const resetPassword = async (req: Request, res: Response) => {
     });
   }
 };
+
+// Update the authenticated user's profile.
+export const updateProfile = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({
+        message: "Authentication required",
+      });
+    }
+
+    const { name } = req.body;
+
+    if (typeof name !== "string" || !name.trim()) {
+      return res.status(400).json({
+        message: "Name is required",
+      });
+    }
+
+    if (name.trim().length < 2) {
+      return res.status(400).json({
+        message: "Name must contain at least 2 characters",
+      });
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      req.userId,
+      {
+        name: name.trim(),
+      },
+      {
+        new: true,
+        runValidators: true,
+      }
+    ).select("name email");
+
+    if (!updatedUser) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    return res.status(200).json({
+      message: "Profile updated successfully",
+      user: getPublicUser(updatedUser),
+    });
+  } catch (error) {
+    console.error("Update profile error:", error);
+
+    return res.status(500).json({
+      message: "Could not update profile",
+    });
+  }
+};
+

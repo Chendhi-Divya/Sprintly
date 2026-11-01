@@ -22,6 +22,10 @@ interface VerifyEmailResponse extends MessageResponse {
   user: AuthUser;
 }
 
+interface UpdateProfileResponse extends MessageResponse {
+  user: AuthUser;
+}
+
 interface EmailRequest {
   email: string;
 }
@@ -55,7 +59,12 @@ export const authApi = createApi({
   endpoints: (builder) => ({
     register: builder.mutation<
       MessageResponse,
-      { name: string; email: string; password: string; confirmPassword: string }
+      {
+        name: string;
+        email: string;
+        password: string;
+        confirmPassword: string;
+      }
     >({
       query: (data) => ({
         url: "/register",
@@ -88,6 +97,18 @@ export const authApi = createApi({
     getCurrentUser: builder.query<{ user: AuthUser }, void>({
       query: () => "/me",
       providesTags: ["Auth"],
+    }),
+
+    updateProfile: builder.mutation<
+      UpdateProfileResponse,
+      { name: string }
+    >({
+      query: (data) => ({
+        url: "/profile",
+        method: "PUT",
+        body: data,
+      }),
+      invalidatesTags: ["Auth"],
     }),
 
     logout: builder.mutation<MessageResponse, void>({
@@ -132,6 +153,7 @@ export const {
   useVerifyEmailMutation,
   useLoginMutation,
   useGetCurrentUserQuery,
+  useUpdateProfileMutation,
   useLogoutMutation,
   useResendOTPMutation,
   useForgotPasswordMutation,

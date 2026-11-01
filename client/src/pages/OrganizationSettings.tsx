@@ -8,8 +8,9 @@ import {
   Check,
   MailPlus,
   UsersRound,
-  X,
+ 
   Plus,
+  ChevronDown,
 } from "lucide-react";
 
 import Navbar from "../components/Navbar";
@@ -100,18 +101,14 @@ export default function OrganizationSettings() {
   const [notice, setNotice] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
-  // Keep track of members removed successfully.
-  // This updates the UI immediately without waiting for the API refetch.
   const [removedMemberIds, setRemovedMemberIds] = useState<Set<string>>(
     new Set()
   );
 
-  // Clear locally removed members when switching organizations.
   useEffect(() => {
     setRemovedMemberIds(new Set());
   }, [orgId]);
 
-  // Fetch selected organization.
   const {
     data,
     isLoading,
@@ -124,7 +121,6 @@ export default function OrganizationSettings() {
 
   const organization = data?.organization;
 
-  // Fetch invitations sent to the current user.
   const {
     data: incomingData,
     isLoading: isLoadingIncoming,
@@ -134,20 +130,15 @@ export default function OrganizationSettings() {
 
   const currentUserId = user?._id ?? user?.id ?? "";
 
-  // Support both backend response formats:
-  // 1. memberships: [{ user, role }]
-  // 2. members: [userId or populated user], with admin field.
   const members = useMemo<OrganizationMembership[]>(() => {
     if (!organization) return [];
 
     const existingMemberships = organization.memberships ?? [];
     const adminId = getMemberId(organization.admin);
 
-    // If the backend already returns memberships, use them.
     if (existingMemberships.length > 0) {
       const normalized = [...existingMemberships];
 
-      // Ensure the organization admin is represented.
       if (
         adminId &&
         !normalized.some(
@@ -163,7 +154,6 @@ export default function OrganizationSettings() {
       return normalized;
     }
 
-    // Older backend response: members + admin.
     const oldMembers = organization.members ?? [];
 
     const normalized = oldMembers.map((member) => ({
@@ -174,7 +164,6 @@ export default function OrganizationSettings() {
           : ("Member" as OrganizationRole),
     }));
 
-    // Add admin if it was not included in members.
     if (
       organization.admin &&
       !normalized.some(
@@ -190,7 +179,6 @@ export default function OrganizationSettings() {
     return normalized;
   }, [organization]);
 
-  // Hide members that have just been successfully removed.
   const visibleMembers = useMemo(
     () =>
       members.filter(
@@ -214,7 +202,6 @@ export default function OrganizationSettings() {
     currentRole === "Admin" ||
     isOrganizationAdmin;
 
-  // Fetch outgoing invitations only after permissions are known.
   const {
     data: outgoingData,
     isLoading: isLoadingOutgoing,
@@ -415,25 +402,19 @@ export default function OrganizationSettings() {
     setNotice("");
 
     try {
-      // 1. Call the DELETE API.
       await removeMember({
         orgId,
         memberId,
       }).unwrap();
 
-      // 2. Hide the member immediately after successful removal.
       setRemovedMemberIds((previousIds) => {
         const updatedIds = new Set(previousIds);
         updatedIds.add(memberId);
         return updatedIds;
       });
 
-      // 3. Show success immediately.
       setNotice("Member removed from the organization.");
 
-      // 4. Refresh organization data in the background.
-      // A refresh failure must not show a removal failure because
-      // the DELETE API has already succeeded.
       void refetchOrganization().catch((error: unknown) => {
         console.error(
           "Organization refresh after member removal failed:",
@@ -574,17 +555,7 @@ export default function OrganizationSettings() {
               {organization?.org_name ?? selectedOrganization.org_name}
             </div>
 
-            {isFocusedSettingsView && (
-              <button
-                type="button"
-                onClick={() => navigate("/dashboard")}
-                aria-label="Close settings"
-                title="Close settings"
-                className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-              >
-                <X size={18} />
-              </button>
-            )}
+          
           </div>
         </div>
 
@@ -596,14 +567,7 @@ export default function OrganizationSettings() {
             <Check size={17} className="shrink-0" />
             {notice}
 
-            <button
-              type="button"
-              onClick={() => setNotice("")}
-              aria-label="Dismiss notification"
-              className="ml-1 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-            >
-              <X size={15} />
-            </button>
+            
           </div>
         )}
 
@@ -672,7 +636,6 @@ export default function OrganizationSettings() {
             )}
 
             <section className="space-y-5">
-              {/* GENERAL SETTINGS */}
               {tab === "General" && (
                 <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
                   <div className="flex flex-wrap items-center justify-between gap-4">
@@ -771,7 +734,6 @@ export default function OrganizationSettings() {
                 </div>
               )}
 
-              {/* MEMBERS AND INVITATIONS */}
               {tab === "Members" && (
                 <>
                   <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -817,29 +779,36 @@ export default function OrganizationSettings() {
                           />
                         </label>
 
-                        <select
-                          value={inviteRole}
-                          onChange={(event) =>
-                            setInviteRole(
-                              event.target.value as OrganizationRole
-                            )
-                          }
-                          className="rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm"
-                        >
-                          {roles
-                            .filter(
-                              (role) =>
-                                role !== "Owner" &&
-                                (currentRole === "Owner" ||
-                                  isOrganizationAdmin ||
-                                  role !== "Admin")
-                            )
-                            .map((role) => (
-                              <option key={role} value={role}>
-                                {role}
-                              </option>
-                            ))}
-                        </select>
+                        <div className="relative">
+                          <select
+                            value={inviteRole}
+                            onChange={(event) =>
+                              setInviteRole(
+                                event.target.value as OrganizationRole
+                              )
+                            }
+                            className="w-full appearance-none rounded-lg border border-slate-300 bg-white py-2.5 pl-3 pr-9 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                          >
+                            {roles
+                              .filter(
+                                (role) =>
+                                  role !== "Owner" &&
+                                  (currentRole === "Owner" ||
+                                    isOrganizationAdmin ||
+                                    role !== "Admin")
+                              )
+                              .map((role) => (
+                                <option key={role} value={role}>
+                                  {role}
+                                </option>
+                              ))}
+                          </select>
+
+                          <ChevronDown
+                            size={15}
+                            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500"
+                          />
+                        </div>
 
                         <button
                           type="submit"
@@ -899,38 +868,45 @@ export default function OrganizationSettings() {
                                 </p>
                               </div>
 
-                              <select
-                                aria-label={`Role for ${person?.name ?? "member"}`}
-                                value={membership.role}
-                                disabled={
-                                  !canManage ||
-                                  isSelf ||
-                                  isUpdatingRole ||
-                                  (membership.role === "Owner" &&
-                                    currentRole !== "Owner" &&
-                                    !isOrganizationAdmin)
-                                }
-                                onChange={(event) =>
-                                  void handleRoleChange(
-                                    memberId,
-                                    event.target.value as OrganizationRole
-                                  )
-                                }
-                                className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm disabled:bg-slate-50"
-                              >
-                                {roles
-                                  .filter(
-                                    (role) =>
-                                      role !== "Owner" ||
-                                      currentRole === "Owner" ||
-                                      isOrganizationAdmin
-                                  )
-                                  .map((role) => (
-                                    <option key={role} value={role}>
-                                      {role}
-                                    </option>
-                                  ))}
-                              </select>
+                              <div className="relative w-32 shrink-0">
+                                <select
+                                  aria-label={`Role for ${person?.name ?? "member"}`}
+                                  value={membership.role}
+                                  disabled={
+                                    !canManage ||
+                                    isSelf ||
+                                    isUpdatingRole ||
+                                    (membership.role === "Owner" &&
+                                      currentRole !== "Owner" &&
+                                      !isOrganizationAdmin)
+                                  }
+                                  onChange={(event) =>
+                                    void handleRoleChange(
+                                      memberId,
+                                      event.target.value as OrganizationRole
+                                    )
+                                  }
+                                  className="w-full appearance-none rounded-lg border border-slate-200 bg-white py-2 pl-3 pr-9 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500"
+                                >
+                                  {roles
+                                    .filter(
+                                      (role) =>
+                                        role !== "Owner" ||
+                                        currentRole === "Owner" ||
+                                        isOrganizationAdmin
+                                    )
+                                    .map((role) => (
+                                      <option key={role} value={role}>
+                                        {role}
+                                      </option>
+                                    ))}
+                                </select>
+
+                                <ChevronDown
+                                  size={15}
+                                  className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500"
+                                />
+                              </div>
 
                               {canManage &&
                                 !isSelf &&

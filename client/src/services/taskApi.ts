@@ -689,6 +689,7 @@ export const {
   // Organizations
   useGetOrganizationsQuery,
   useLazyGetOrganizationsQuery,
+  useLazyGetProjectsQuery,
   useGetOrganizationByIdQuery,
   useCreateOrganizationMutation,
   useCreateOrganizationWithFirstProjectMutation,

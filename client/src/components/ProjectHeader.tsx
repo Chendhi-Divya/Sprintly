@@ -40,6 +40,10 @@ const statuses = ["To Do", "In Progress", "In Review", "Done"];
 const priorities = ["Low", "Medium", "High"];
 const taskTypes = ["Epic", "Story", "Task", "Bug"];
 
+// Store the recent project separately for each organization.
+const getRecentProjectKey = (organizationId: string) =>
+  `sprintly_recent_project_${organizationId}`;
+
 export default function ProjectHeader({
   selectedProjectId = "",
   onProjectChange,
@@ -53,16 +57,20 @@ export default function ProjectHeader({
 }: ProjectHeaderProps) {
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] =
     useState(false);
+
   const [isFilterOpen, setIsFilterOpen] = useState(false);
 
   const navigate = useNavigate();
 
+  // Get the selected organization from Redux.
   const selectedOrganization = useSelector(
     (state: RootState) => state.auth.selectedOrganization
   );
 
-  const organizationId = selectedOrganization?._id ?? "";
+  // Use the MongoDB organization ID consistently.
+  const organizationId = selectedOrganization?._id || "";
 
+  // Fetch projects belonging to the selected organization.
   const {
     data: projectsData,
     isLoading,
@@ -73,8 +81,10 @@ export default function ProjectHeader({
 
   const projects = projectsData?.projects ?? [];
 
+  // Fetch tasks to populate the assignee filter.
   const { data: tasksData } = useGetTasksQuery();
 
+  // Get unique assignees.
   const assignees = useMemo(() => {
     const uniqueAssignees = new Map<
       string,
@@ -102,8 +112,11 @@ export default function ProjectHeader({
     );
   }, [tasksData?.tasks]);
 
+  // Restore a valid selected project after loading projects.
   useEffect(() => {
-    if (!organizationId || isLoading || isError) return;
+    if (!organizationId || isLoading || isError) {
+      return;
+    }
 
     if (projects.length === 0) {
       if (selectedProjectId) {
@@ -112,22 +125,66 @@ export default function ProjectHeader({
       return;
     }
 
+    // Check whether the currently selected project belongs
+    // to the selected organization.
     const projectExists = projects.some(
       (project) => project._id === selectedProjectId
     );
 
-    if (!projectExists) {
-      onProjectChange?.(projects[0]._id);
+    if (projectExists) {
+      // Keep the current project as the recent project.
+      try {
+        localStorage.setItem(
+          getRecentProjectKey(organizationId),
+          selectedProjectId
+        );
+      } catch {
+        // Ignore localStorage errors.
+      }
+
+      return;
+    }
+
+    // If the current project is invalid, check the recent project.
+    let recentProjectId = "";
+
+    try {
+      recentProjectId =
+        localStorage.getItem(
+          getRecentProjectKey(organizationId)
+        ) || "";
+    } catch {
+      recentProjectId = "";
+    }
+
+    const recentProject = projects.find(
+      (project) => project._id === recentProjectId
+    );
+
+    // Open the recent project if it exists.
+    // Otherwise, open the first available project.
+    const projectToSelect = recentProject ?? projects[0];
+
+    onProjectChange?.(projectToSelect._id);
+
+    try {
+      localStorage.setItem(
+        getRecentProjectKey(organizationId),
+        projectToSelect._id
+      );
+    } catch {
+      // Ignore localStorage errors.
     }
   }, [
     organizationId,
-    projects,
-    selectedProjectId,
     isLoading,
     isError,
+    projects,
+    selectedProjectId,
     onProjectChange,
   ]);
 
+  // Get the currently selected project.
   const selectedProject = projects.find(
     (project) => project._id === selectedProjectId
   );
@@ -136,8 +193,23 @@ export default function ProjectHeader({
     (value) => value !== ""
   ).length;
 
+  // Handle switching between projects.
   function handleProjectSelect(projectId: string) {
+    // Update the selected project in Dashboard/WorkspaceLayout.
     onProjectChange?.(projectId);
+
+    // Save the project ID for this organization.
+    if (organizationId) {
+      try {
+        localStorage.setItem(
+          getRecentProjectKey(organizationId),
+          projectId
+        );
+      } catch {
+        // Ignore localStorage errors.
+      }
+    }
+
     setIsProjectDropdownOpen(false);
   }
 
@@ -171,6 +243,7 @@ export default function ProjectHeader({
           className={selectClassName}
         >
           <option value="">{placeholder}</option>
+
           {options.map((option) => (
             <option key={option} value={option}>
               {option}
@@ -206,6 +279,7 @@ export default function ProjectHeader({
             <p className="font-medium text-gray-900">
               No organization selected
             </p>
+
             <button
               type="button"
               onClick={() => navigate("/organizations")}
@@ -219,6 +293,7 @@ export default function ProjectHeader({
             <p className="font-medium text-gray-900">
               No projects yet
             </p>
+
             <p className="text-sm text-gray-500">
               {selectedOrganization?.org_name ?? "This organization"} has no projects.
               Create one from Organization Settings.
@@ -259,7 +334,7 @@ export default function ProjectHeader({
                 <div className="absolute left-0 top-full z-50 mt-2 w-72 rounded-xl border border-gray-200 bg-white p-2 shadow-xl">
                   {projects.map((project) => {
                     const isSelected =
-                      project._id === selectedProjectId;
+                      project._id === selectedProject?._id;
 
                     return (
                       <button
@@ -294,6 +369,7 @@ export default function ProjectHeader({
 
       {/* View tabs, search, filters and create task */}
       <div className="flex flex-wrap items-center gap-4 border-t border-gray-100 px-4 py-3 sm:px-6">
+        {/* View tabs */}
         <div className="flex shrink-0 items-center gap-5">
           {(["List", "Board"] as const).map((tab) => {
             const Icon = tab === "List" ? List : LayoutDashboard;
@@ -353,6 +429,7 @@ export default function ProjectHeader({
             }`}
           >
             <Filter size={16} />
+
             <span>Filter</span>
 
             {activeFilterCount > 0 && (
@@ -394,10 +471,12 @@ export default function ProjectHeader({
                 </div>
 
                 <div className="space-y-4">
+                  {/* Status */}
                   <div>
                     <label className="mb-1.5 block text-sm font-medium text-gray-700">
                       Status
                     </label>
+
                     {renderFilterSelect(
                       filters.status,
                       (value) => updateFilter("status", value),
@@ -406,10 +485,12 @@ export default function ProjectHeader({
                     )}
                   </div>
 
+                  {/* Priority */}
                   <div>
                     <label className="mb-1.5 block text-sm font-medium text-gray-700">
                       Priority
                     </label>
+
                     {renderFilterSelect(
                       filters.priority,
                       (value) => updateFilter("priority", value),
@@ -418,10 +499,12 @@ export default function ProjectHeader({
                     )}
                   </div>
 
+                  {/* Type */}
                   <div>
                     <label className="mb-1.5 block text-sm font-medium text-gray-700">
                       Type
                     </label>
+
                     {renderFilterSelect(
                       filters.type,
                       (value) => updateFilter("type", value),
@@ -430,10 +513,12 @@ export default function ProjectHeader({
                     )}
                   </div>
 
+                  {/* Assignee */}
                   <div>
                     <label className="mb-1.5 block text-sm font-medium text-gray-700">
                       Assignee
                     </label>
+
                     <div className="relative">
                       <select
                         value={filters.assignee ?? ""}
@@ -443,8 +528,12 @@ export default function ProjectHeader({
                         className={selectClassName}
                       >
                         <option value="">All assignees</option>
+
                         {assignees.map((assignee) => (
-                          <option key={assignee._id} value={assignee._id}>
+                          <option
+                            key={assignee._id}
+                            value={assignee._id}
+                          >
                             {assignee.name}
                           </option>
                         ))}
@@ -475,7 +564,7 @@ export default function ProjectHeader({
         <button
           type="button"
           onClick={handleCreateTask}
-          disabled={!selectedProjectId}
+          disabled={!selectedProject?._id}
           className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Plus size={17} />

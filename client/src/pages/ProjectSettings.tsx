@@ -3,11 +3,10 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  X,
   ArrowLeft,
   UserRound,
   CalendarDays,
-  Trash2,
+  Trash,
 } from "lucide-react";
 
 import Navbar from "../components/Navbar";
@@ -22,7 +21,11 @@ function getFailureMessage(
   error: unknown,
   fallback: string
 ): string {
-  if (typeof error === "object" && error !== null && "data" in error) {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "data" in error
+  ) {
     const data = (error as {
       data?: { message?: string };
     }).data;
@@ -106,7 +109,7 @@ export default function ProjectSettings() {
 
   const isBusy = isSaving || isDeleting;
 
-  // Populate the form when project details are loaded.
+  // Populate form when project details are loaded.
   useEffect(() => {
     if (!project) return;
 
@@ -115,7 +118,7 @@ export default function ProjectSettings() {
     setDescription(project.description ?? "");
   }, [project]);
 
-  // Automatically hide the success notification.
+  // Automatically hide success notification.
   useEffect(() => {
     if (!successMessage) return;
 
@@ -126,13 +129,43 @@ export default function ProjectSettings() {
     return () => window.clearTimeout(timer);
   }, [successMessage]);
 
+  // Check whether any project field has changed.
+  const hasProjectChanges = Boolean(
+    project &&
+      (
+        name.trim() !== (project.name ?? "") ||
+        projectKey.trim().toUpperCase() !==
+          (project.key ?? "").toUpperCase() ||
+        description.trim() !== (project.description ?? "")
+      )
+  );
+
   const handleClose = () => {
     navigate("/dashboard");
   };
 
-  // Update project details.
+  // Restore original project details.
+  const handleCancelChanges = () => {
+    if (!project) return;
+
+    setName(project.name ?? "");
+    setProjectKey(project.key ?? "");
+    setDescription(project.description ?? "");
+    setErrorMessage("");
+    setSuccessMessage("");
+  };
+
+  // Update project details after confirmation.
   const handleSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
+    if (!hasProjectChanges || isBusy) return;
+
+    const confirmed = window.confirm(
+      "Are you sure you want to save these project changes?"
+    );
+
+    if (!confirmed) return;
 
     setErrorMessage("");
     setSuccessMessage("");
@@ -236,44 +269,14 @@ export default function ProjectSettings() {
         </button>
 
         {/* Page heading */}
-        <div className="mb-8 flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-slate-950">
-              Project settings
-            </h1>
+        <div className="mb-8">
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-950">
+            Project settings
+          </h1>
 
-            <p className="mt-1 text-sm text-slate-500">
-              Manage your project details and information.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {/* Delete icon */}
-            <button
-              type="button"
-              onClick={() => {
-                setErrorMessage("");
-                setShowDeleteConfirm(true);
-              }}
-              disabled={isBusy || !project}
-              aria-label="Delete project"
-              title="Delete project"
-              className="rounded-lg border border-rose-200 bg-white p-2 text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Trash2 size={19} />
-            </button>
-
-            {/* Close settings */}
-            <button
-              type="button"
-              onClick={handleClose}
-              aria-label="Close project settings"
-              title="Close settings"
-              className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-            >
-              <X size={20} />
-            </button>
-          </div>
+          <p className="mt-1 text-sm text-slate-500">
+            Manage your project details and information.
+          </p>
         </div>
 
         {/* General error message */}
@@ -309,6 +312,27 @@ export default function ProjectSettings() {
             onSubmit={handleSave}
             className="space-y-8 rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
           >
+            {/* Form header with delete button */}
+            <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-5">
+              <h2 className="text-base font-semibold text-slate-900">
+                General settings
+              </h2>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setErrorMessage("");
+                  setShowDeleteConfirm(true);
+                }}
+                disabled={isBusy || !project}
+                aria-label="Delete project"
+                title="Delete project"
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Trash size={16} />
+              </button>
+            </div>
+
             {/* Project details */}
             <section>
               <h2 className="mb-5 text-base font-semibold text-slate-900">
@@ -384,7 +408,9 @@ export default function ProjectSettings() {
                   <textarea
                     id="project-description"
                     value={description}
-                    onChange={(event) => setDescription(event.target.value)}
+                    onChange={(event) =>
+                      setDescription(event.target.value)
+                    }
                     placeholder="Enter project description"
                     rows={4}
                     maxLength={1000}
@@ -444,23 +470,18 @@ export default function ProjectSettings() {
               </div>
             </section>
 
-            {/* Form actions */}
-            <div className="flex flex-col-reverse gap-3 border-t border-slate-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs text-slate-400">
-                {isFetching && !isLoading ? "Refreshing project..." : ""}
-              </p>
-
-              <div className="flex justify-end gap-3">
+            {/* Save and Cancel appear only when changes exist */}
+            {hasProjectChanges && (
+              <div className="flex justify-end gap-3 border-t border-slate-200 pt-5">
                 <button
                   type="button"
-                  onClick={handleClose}
+                  onClick={handleCancelChanges}
                   disabled={isBusy}
                   className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
                 >
                   Cancel
                 </button>
 
-                {/* Save button without icon */}
                 <button
                   type="submit"
                   disabled={isBusy}
@@ -469,12 +490,18 @@ export default function ProjectSettings() {
                   {isSaving ? "Saving..." : "Save"}
                 </button>
               </div>
-            </div>
+            )}
+
+            {isFetching && !isLoading && (
+              <p className="text-right text-xs text-slate-400">
+                Refreshing project...
+              </p>
+            )}
           </form>
         )}
       </main>
 
-      {/* Centered delete confirmation overlay */}
+      {/* Delete confirmation modal */}
       {showDeleteConfirm && project && (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 px-4 py-6"
@@ -492,8 +519,8 @@ export default function ProjectSettings() {
             className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-2xl"
           >
             <div className="flex items-start gap-3">
-              <div className="rounded-lg bg-rose-50 p-2">
-                <Trash2 size={20} className="text-rose-600" />
+              <div className="rounded-lg bg-slate-100 p-2">
+                <Trash size={20} className="text-slate-600" />
               </div>
 
               <div className="min-w-0 flex-1">
@@ -512,20 +539,9 @@ export default function ProjectSettings() {
                   <span className="font-semibold text-slate-800">
                     {project.name}
                   </span>
-                  ? All tasks belonging to this project will also be
-                  permanently deleted. This action cannot be undone.
+                  ? This action cannot be undone.
                 </p>
               </div>
-
-              <button
-                type="button"
-                onClick={closeDeleteConfirm}
-                disabled={isDeleting}
-                aria-label="Close confirmation"
-                className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
-              >
-                <X size={18} />
-              </button>
             </div>
 
             {/* Delete error */}
@@ -553,9 +569,9 @@ export default function ProjectSettings() {
                 type="button"
                 onClick={handleDelete}
                 disabled={isDeleting}
-                className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-800 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <Trash2 size={15} />
+                <Trash size={15} />
                 {isDeleting ? "Deleting..." : "Delete project"}
               </button>
             </div>

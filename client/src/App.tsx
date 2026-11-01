@@ -17,6 +17,7 @@ import WorkspaceLayout from "./pages/WorkspaceLayout";
 import OrganizationSettings from "./pages/OrganizationSettings";
 import ProjectSettings from "./pages/ProjectSettings.tsx";
 
+
 const RegisterPage = Register as unknown as ComponentType;
 
 function App() {

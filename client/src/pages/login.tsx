@@ -18,7 +18,10 @@ import { Label } from "@/components/ui/label";
 import { Eye, EyeOff } from "lucide-react";
 
 import { useLoginMutation } from "../services/authApi";
-import { useLazyGetOrganizationsQuery } from "../services/taskApi";
+import {
+  useLazyGetOrganizationsQuery,
+  useLazyGetProjectsQuery,
+} from "../services/taskApi";
 
 const loginSchema = z.object({
   email: z
@@ -49,6 +52,11 @@ export default function Login() {
     { isFetching: isOrganizationsLoading },
   ] = useLazyGetOrganizationsQuery();
 
+  const [
+    getProjects,
+    { isFetching: isProjectsLoading },
+  ] = useLazyGetProjectsQuery();
+
   const {
     register,
     handleSubmit,
@@ -61,42 +69,73 @@ export default function Login() {
     setErrorMessage("");
 
     try {
-      // Step 1: Log in
+      // Step 1: Login
       const response = await loginUser({
         email: data.email,
         password: data.password,
       }).unwrap();
 
-      // Step 2: Save the logged-in user
+      // Step 2: Save logged-in user
       dispatch(
         setCredentials({
           user: response.user,
         })
       );
 
-      // Step 3: Fetch the user's organizations
+      // Step 3: Fetch organizations
       const organizationResponse =
-  await getOrganizations().unwrap();
+        await getOrganizations().unwrap();
 
-const organizations = organizationResponse.organizations;
+      const organizations =
+        organizationResponse.organizations ?? [];
 
-if (organizations.length === 1) {
-  dispatch(setSelectedOrganization(organizations[0]));
-  navigate("/dashboard");
-} else {
-  navigate("/organizations");
-}
+      // No organizations: go to organization creation
+      if (organizations.length === 0) {
+        navigate("/organizations", { replace: true });
+        return;
+      }
+
+      // Multiple organizations: ask user to choose
+      if (organizations.length > 1) {
+        navigate("/organizations", { replace: true });
+        return;
+      }
+
+      // Exactly one organization
+      const organization = organizations[0];
+
+      dispatch(setSelectedOrganization(organization));
+
+      // Step 4: Fetch projects for this organization
+      const projectResponse = await getProjects(
+        organization._id
+      ).unwrap();
+
+      const projects = projectResponse.projects ?? [];
+
+      // No projects: create first project
+      if (projects.length === 0) {
+        navigate("/projects/create", { replace: true });
+        return;
+      }
+
+      // Projects exist: open dashboard
+      navigate("/dashboard", { replace: true });
+
     } catch (error: any) {
-      console.error("Login or organization loading failed:", error);
+      console.error("Login or workspace loading failed:", error);
 
       setErrorMessage(
         error?.data?.message ||
-          "Unable to log in or load organizations. Please try again."
+          "Unable to log in or load your workspace. Please try again."
       );
     }
   };
 
-  const isLoading = isLoginLoading || isOrganizationsLoading;
+  const isLoading =
+    isLoginLoading ||
+    isOrganizationsLoading ||
+    isProjectsLoading;
 
   return (
     <div className="min-h-screen flex items-center justify-center">
@@ -191,9 +230,7 @@ if (organizations.length === 1) {
             className="w-full"
             disabled={isLoading}
           >
-            {isLoading
-              ? "Please wait..."
-              : "Login"}
+            {isLoading ? "Please wait..." : "Login"}
           </Button>
 
           {/* Register Link */}

@@ -1,4 +1,3 @@
-
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useDispatch, useSelector } from "react-redux";
@@ -15,11 +14,18 @@ import {
   UsersRound,
   FolderKanban,
   ChevronRight,
+  ChevronDown,
+  UserPen,
+  LogOut,
 } from "lucide-react";
 
-import { logout } from "../store/authSlice";
+import { logout, updateUser } from "../store/authSlice";
 import type { RootState } from "../store/store";
-import { useLogoutMutation } from "../services/authApi";
+
+import {
+  useLogoutMutation,
+  useUpdateProfileMutation,
+} from "../services/authApi";
 
 import {
   useGetProjectsQuery,
@@ -84,11 +90,12 @@ export default function Navbar({
   selectedProjectId = "",
 }: NavbarProps) {
   const [searchText, setSearchText] = useState("");
+
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
-  const [settingsSearch, setSettingsSearch] = useState("");
+  const [showEditProfile, setShowEditProfile] = useState(false);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -97,8 +104,13 @@ export default function Navbar({
   const [assignee, setAssignee] = useState("");
   const [parentTask, setParentTask] = useState("");
   const [dueDate, setDueDate] = useState("");
+
   const [errorMessage, setErrorMessage] = useState("");
   const [notificationError, setNotificationError] = useState("");
+
+  const [profileName, setProfileName] = useState("");
+  const [profileError, setProfileError] = useState("");
+  const [profileSuccess, setProfileSuccess] = useState("");
 
   const profileRef = useRef<HTMLDivElement>(null);
   const notificationsRef = useRef<HTMLDivElement>(null);
@@ -110,11 +122,7 @@ export default function Navbar({
     (state: RootState) => state.auth.selectedOrganization
   );
 
-  const organizationId =
-    selectedOrganization?.org_id ||
-    selectedOrganization?._id ||
-    "";
-
+  const organizationId = selectedOrganization?._id || "";
   const organizationName = selectedOrganization?.org_name ?? "";
 
   const dispatch = useDispatch();
@@ -122,6 +130,11 @@ export default function Navbar({
 
   const [logoutRequest, { isLoading: isLoggingOut }] =
     useLogoutMutation();
+
+  const [
+    updateProfile,
+    { isLoading: isUpdatingProfile },
+  ] = useUpdateProfileMutation();
 
   const {
     data: projectsData,
@@ -161,13 +174,11 @@ export default function Navbar({
   const projects = projectsData?.projects ?? [];
   const tasks = tasksData?.tasks ?? [];
 
-  const projectId =
-    selectedProjectId ||
-    (projects.length === 1 ? projects[0]._id : "");
+  const selectedProject =
+    projects.find((project) => project._id === selectedProjectId) ??
+    projects[0];
 
-  const selectedProject = projects.find(
-    (project) => project._id === projectId
-  );
+  const projectId = selectedProject?._id ?? "";
 
   const {
     data: membersData,
@@ -192,7 +203,7 @@ export default function Navbar({
 
   const unreadCount = notificationsData?.unreadCount ?? 0;
 
-  // Close dropdowns when clicking outside them.
+  // Close dropdowns when clicking outside.
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       const target = event.target;
@@ -231,7 +242,7 @@ export default function Navbar({
     };
   }, []);
 
-  // Listen for the Create Task button in ProjectHeader.
+  // Listen for Create Task button from ProjectHeader.
   useEffect(() => {
     function handleOpenCreateTask() {
       setTitle("");
@@ -267,6 +278,7 @@ export default function Navbar({
     setAssignee("");
   }, [projectId]);
 
+  // Reset task form.
   function resetForm() {
     setTitle("");
     setDescription("");
@@ -278,8 +290,7 @@ export default function Navbar({
     setErrorMessage("");
   }
 
- 
-
+  // Logout.
   async function handleLogout() {
     try {
       await logoutRequest().unwrap();
@@ -287,11 +298,23 @@ export default function Navbar({
       // Clear the local session even if the server is unavailable.
     } finally {
       dispatch(logout());
+
       setShowProfileMenu(false);
       setShowNotifications(false);
       setShowSettingsMenu(false);
-      navigate("/login");
+      setShowEditProfile(false);
+
+      navigate("/login", { replace: true });
     }
+  }
+
+  // Switch organization without logging out.
+  function handleSwitchOrganization() {
+    setShowProfileMenu(false);
+    setShowNotifications(false);
+    setShowSettingsMenu(false);
+
+    navigate("/organizations");
   }
 
   function handleClose() {
@@ -301,6 +324,77 @@ export default function Navbar({
     setErrorMessage("");
   }
 
+  // Open Edit Profile modal.
+  function handleOpenEditProfile() {
+    setProfileName(user?.name ?? "");
+    setProfileError("");
+    setProfileSuccess("");
+
+    setShowProfileMenu(false);
+    setShowEditProfile(true);
+  }
+
+  // Close Edit Profile modal.
+  function handleCloseEditProfile() {
+    if (isUpdatingProfile) return;
+
+    setShowEditProfile(false);
+    setProfileError("");
+    setProfileSuccess("");
+  }
+
+  // Save updated name.
+  async function handleProfileUpdate(
+    event: FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+
+    setProfileError("");
+    setProfileSuccess("");
+
+    const trimmedName = profileName.trim();
+
+    if (!trimmedName) {
+      setProfileError("Name is required.");
+      return;
+    }
+
+    if (trimmedName.length < 2) {
+      setProfileError(
+        "Name must contain at least 2 characters."
+      );
+      return;
+    }
+
+    if (trimmedName === user?.name) {
+      setProfileError("No changes were made.");
+      return;
+    }
+
+    try {
+      const response = await updateProfile({
+        name: trimmedName,
+      }).unwrap();
+
+      dispatch(
+        updateUser({
+          name: response.user.name,
+        })
+      );
+
+      setProfileSuccess("Profile updated successfully.");
+
+      setTimeout(() => {
+        setShowEditProfile(false);
+        setProfileSuccess("");
+      }, 800);
+    } catch (error: unknown) {
+      console.error("Profile update error:", error);
+      setProfileError(getErrorMessage(error));
+    }
+  }
+
+  // Create task.
   async function handleSubmit(
     event: FormEvent<HTMLFormElement>
   ) {
@@ -313,7 +407,9 @@ export default function Navbar({
     }
 
     if (isProjectsError) {
-      setErrorMessage("Could not load projects. Please try again.");
+      setErrorMessage(
+        "Could not load projects. Please try again."
+      );
       return;
     }
 
@@ -368,6 +464,7 @@ export default function Navbar({
     }
   }
 
+  // Mark notification as read.
   async function handleMarkAsRead(
     notification: SprintlyNotification
   ) {
@@ -381,7 +478,10 @@ export default function Navbar({
         organizationId,
       }).unwrap();
     } catch (error: unknown) {
-      console.error("Failed to mark notification as read:", error);
+      console.error(
+        "Failed to mark notification as read:",
+        error
+      );
       setNotificationError(getErrorMessage(error));
     }
   }
@@ -400,15 +500,14 @@ export default function Navbar({
   }
 
   function handleSettingsToggle() {
-    const willOpen = !showSettingsMenu;
-
-    setShowSettingsMenu(willOpen);
-    setSettingsSearch("");
+    setShowSettingsMenu((open) => !open);
     setShowProfileMenu(false);
     setShowNotifications(false);
   }
 
-  function openOrganizationSettings(section: "General" | "Members") {
+  function openOrganizationSettings(
+    section: "General" | "Members"
+  ) {
     setShowSettingsMenu(false);
     setShowProfileMenu(false);
 
@@ -421,13 +520,13 @@ export default function Navbar({
     setShowSettingsMenu(false);
     setShowProfileMenu(false);
 
-    if (selectedProject) {
+    if (selectedProject?._id) {
       navigate(`/projects/${selectedProject._id}/settings`);
       return;
     }
 
     navigate("/settings/organization", {
-      state: { section: "Project settings" },
+      state: { section: "General" },
     });
   }
 
@@ -459,28 +558,19 @@ export default function Navbar({
     },
     {
       label: "Members and invitations",
-      description: "Invite people and manage organization members",
+      description:
+        "Invite people and manage organization members",
       icon: UsersRound,
       onClick: () => openOrganizationSettings("Members"),
     },
     {
       label: "Project settings",
-      description: "Edit project name, issue key, access, and workflow",
+      description:
+        "Edit project name, issue key, access, and workflow",
       icon: FolderKanban,
       onClick: openProjectSettings,
     },
   ];
-
-  const filteredSettings = settingsItems.filter((item) => {
-    const query = settingsSearch.trim().toLowerCase();
-
-    return (
-      !query ||
-      `${item.label} ${item.description}`
-        .toLowerCase()
-        .includes(query)
-    );
-  });
 
   return (
     <>
@@ -497,7 +587,10 @@ export default function Navbar({
 
           {organizationName && (
             <>
-              <span aria-hidden="true" className="text-gray-300">
+              <span
+                aria-hidden="true"
+                className="text-gray-300"
+              >
                 /
               </span>
 
@@ -511,7 +604,7 @@ export default function Navbar({
           )}
         </div>
 
-        {/* Search */}
+        {/* Global task search */}
         <div className="flex items-center gap-2">
           <div className="flex w-56 items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 focus-within:border-blue-500">
             <Search
@@ -534,7 +627,7 @@ export default function Navbar({
 
         {/* Notifications, settings, and profile */}
         <div className="flex shrink-0 items-center gap-4">
-          {/* Notifications dropdown */}
+          {/* Notifications */}
           <div ref={notificationsRef} className="relative">
             <button
               type="button"
@@ -687,7 +780,7 @@ export default function Navbar({
             )}
           </div>
 
-          {/* Settings dropdown */}
+          {/* Settings */}
           <div ref={settingsRef} className="relative">
             <button
               type="button"
@@ -706,69 +799,45 @@ export default function Navbar({
 
             {showSettingsMenu && (
               <div className="absolute right-0 top-full z-[60] mt-2 max-h-[min(80vh,680px)] w-[min(360px,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl">
-                <div className="border-b border-gray-100 p-4">
+                <div className="border-b border-gray-100 px-4 py-3">
                   <h2 className="text-sm font-semibold text-gray-900">
                     Settings
                   </h2>
-
-                  <div className="mt-3 flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 focus-within:border-blue-500">
-                    <Search
-                      size={16}
-                      className="shrink-0 text-gray-400"
-                    />
-
-                    <input
-                      type="search"
-                      value={settingsSearch}
-                      onChange={(event) =>
-                        setSettingsSearch(event.target.value)
-                      }
-                      placeholder="Search settings..."
-                      aria-label="Search settings"
-                      className="w-full bg-transparent text-sm outline-none"
-                    />
-                  </div>
                 </div>
 
-                <div className="max-h-[calc(min(80vh,680px)-90px)] overflow-y-auto p-2">
-                  {filteredSettings.length === 0 ? (
-                    <p className="px-3 py-8 text-center text-sm text-gray-500">
-                      No settings found.
-                    </p>
-                  ) : (
-                    filteredSettings.map((item) => {
-                      const Icon = item.icon;
+                <div className="max-h-[min(70vh,580px)] overflow-y-auto p-2">
+                  {settingsItems.map((item) => {
+                    const Icon = item.icon;
 
-                      return (
-                        <button
-                          key={item.label}
-                          type="button"
-                          onClick={item.onClick}
-                          className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left transition hover:bg-gray-50"
-                        >
-                          <Icon
-                            size={19}
-                            className="shrink-0 text-gray-500"
-                          />
+                    return (
+                      <button
+                        key={item.label}
+                        type="button"
+                        onClick={item.onClick}
+                        className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left transition hover:bg-gray-50"
+                      >
+                        <Icon
+                          size={19}
+                          className="shrink-0 text-gray-500"
+                        />
 
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-sm font-medium text-gray-800">
-                              {item.label}
-                            </span>
-
-                            <span className="mt-0.5 block text-xs text-gray-500">
-                              {item.description}
-                            </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-medium text-gray-800">
+                            {item.label}
                           </span>
 
-                          <ChevronRight
-                            size={16}
-                            className="shrink-0 text-gray-400"
-                          />
-                        </button>
-                      );
-                    })
-                  )}
+                          <span className="mt-0.5 block text-xs text-gray-500">
+                            {item.description}
+                          </span>
+                        </span>
+
+                        <ChevronRight
+                          size={16}
+                          className="shrink-0 text-gray-400"
+                        />
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -795,26 +864,59 @@ export default function Navbar({
             </button>
 
             {showProfileMenu && (
-              <div className="absolute right-0 top-full z-40 mt-2 w-56 rounded-lg border border-gray-200 bg-white p-2 shadow-lg">
-                <div className="border-b border-gray-100 px-3 py-2">
-                  <p className="truncate text-sm font-semibold text-gray-900">
-                    {user?.name || "User"}
-                  </p>
+              <div className="absolute right-0 top-full z-40 mt-2 w-64 overflow-hidden rounded-xl border border-gray-200 bg-white p-2 shadow-xl">
+                <div className="flex items-center gap-3 border-b border-gray-100 px-3 py-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+                    <UserRound size={21} />
+                  </div>
 
-                  {user?.email && (
-                    <p className="truncate text-xs text-gray-500">
-                      {user.email}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-gray-900">
+                      {user?.name || "User"}
                     </p>
-                  )}
+
+                    <p className="truncate text-xs text-gray-500">
+                      {user?.email || ""}
+                    </p>
+                  </div>
                 </div>
 
+                {/* Edit Profile */}
+                <button
+                  type="button"
+                  onClick={handleOpenEditProfile}
+                  className="mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-gray-700 transition hover:bg-gray-100"
+                >
+                  <UserPen size={18} className="text-gray-500" />
+                  <span>Edit profile</span>
+                </button>
+
+                {/* Switch Organization */}
+                <button
+                  type="button"
+                  onClick={handleSwitchOrganization}
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-gray-700 transition hover:bg-gray-100"
+                >
+                  <Building2
+                    size={18}
+                    className="text-gray-500"
+                  />
+                  <span>Switch organization</span>
+                </button>
+
+                <div className="my-1 border-t border-gray-100" />
+
+                {/* Logout */}
                 <button
                   type="button"
                   onClick={() => void handleLogout()}
                   disabled={isLoggingOut}
-                  className="mt-1 w-full rounded-md px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-gray-700 transition hover:bg-gray-100 disabled:opacity-50"
                 >
-                  {isLoggingOut ? "Logging out..." : "Log out"}
+                  <LogOut size={18} className="text-gray-500" />
+                  <span>
+                    {isLoggingOut ? "Logging out..." : "Log out"}
+                  </span>
                 </button>
               </div>
             )}
@@ -822,7 +924,135 @@ export default function Navbar({
         </div>
       </nav>
 
-      {/* Create task modal */}
+      {/* Edit Profile Modal */}
+      {showEditProfile && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4"
+          onClick={handleCloseEditProfile}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-profile-title"
+            className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-5 flex items-center justify-between">
+              <div>
+                <h2
+                  id="edit-profile-title"
+                  className="text-lg font-semibold text-gray-900"
+                >
+                  Edit profile
+                </h2>
+
+                <p className="mt-1 text-sm text-gray-500">
+                  Update your account information.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleCloseEditProfile}
+                disabled={isUpdatingProfile}
+                aria-label="Close edit profile"
+                className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 disabled:opacity-50"
+              >
+                <X size={19} />
+              </button>
+            </div>
+
+            <form
+              onSubmit={handleProfileUpdate}
+              className="space-y-4"
+            >
+              <div>
+                <label
+                  htmlFor="profile-name"
+                  className="mb-1.5 block text-sm font-medium text-gray-700"
+                >
+                  Full name
+                </label>
+
+                <input
+                  id="profile-name"
+                  type="text"
+                  value={profileName}
+                  onChange={(event) =>
+                    setProfileName(event.target.value)
+                  }
+                  placeholder="Enter your name"
+                  maxLength={60}
+                  autoFocus
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="profile-email"
+                  className="mb-1.5 block text-sm font-medium text-gray-700"
+                >
+                  Email address
+                </label>
+
+                <input
+                  id="profile-email"
+                  type="email"
+                  value={user?.email ?? ""}
+                  disabled
+                  className="w-full cursor-not-allowed rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-500"
+                />
+
+                <p className="mt-1 text-xs text-gray-400">
+                  Email address cannot be changed here.
+                </p>
+              </div>
+
+              {profileError && (
+                <p
+                  role="alert"
+                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+                >
+                  {profileError}
+                </p>
+              )}
+
+              {profileSuccess && (
+                <p
+                  role="status"
+                  className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700"
+                >
+                  {profileSuccess}
+                </p>
+              )}
+
+              <div className="flex justify-end gap-2 border-t border-gray-100 pt-4">
+                <button
+                  type="button"
+                  onClick={handleCloseEditProfile}
+                  disabled={isUpdatingProfile}
+                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={
+                    isUpdatingProfile || !profileName.trim()
+                  }
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isUpdatingProfile ? "Saving..." : "Save changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Create Task Modal */}
       {showCreateForm && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/40 p-4"
@@ -881,7 +1111,9 @@ export default function Navbar({
                 <input
                   id="task-title"
                   value={title}
-                  onChange={(event) => setTitle(event.target.value)}
+                  onChange={(event) =>
+                    setTitle(event.target.value)
+                  }
                   placeholder="Enter task title"
                   required
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
@@ -909,6 +1141,7 @@ export default function Navbar({
               </div>
 
               <div className="grid grid-cols-2 gap-3">
+                {/* Task Type */}
                 <div>
                   <label
                     htmlFor="task-type"
@@ -917,21 +1150,29 @@ export default function Navbar({
                     Task Type
                   </label>
 
-                  <select
-                    id="task-type"
-                    value={type}
-                    onChange={(event) =>
-                      setType(event.target.value as TaskType)
-                    }
-                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
-                  >
-                    <option value="Epic">Epic</option>
-                    <option value="Story">Story</option>
-                    <option value="Task">Task</option>
-                    <option value="Bug">Bug</option>
-                  </select>
+                  <div className="relative">
+                    <select
+                      id="task-type"
+                      value={type}
+                      onChange={(event) =>
+                        setType(event.target.value as TaskType)
+                      }
+                      className="w-full appearance-none rounded-lg border border-gray-300 bg-white px-3 py-2 pr-10 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    >
+                      <option value="Epic">Epic</option>
+                      <option value="Story">Story</option>
+                      <option value="Task">Task</option>
+                      <option value="Bug">Bug</option>
+                    </select>
+
+                    <ChevronDown
+                      size={18}
+                      className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-600"
+                    />
+                  </div>
                 </div>
 
+                {/* Priority */}
                 <div>
                   <label
                     htmlFor="task-priority"
@@ -940,21 +1181,31 @@ export default function Navbar({
                     Priority
                   </label>
 
-                  <select
-                    id="task-priority"
-                    value={priority}
-                    onChange={(event) =>
-                      setPriority(event.target.value as TaskPriority)
-                    }
-                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
-                  >
-                    <option value="Low">Low</option>
-                    <option value="Medium">Medium</option>
-                    <option value="High">High</option>
-                  </select>
+                  <div className="relative">
+                    <select
+                      id="task-priority"
+                      value={priority}
+                      onChange={(event) =>
+                        setPriority(
+                          event.target.value as TaskPriority
+                        )
+                      }
+                      className="w-full appearance-none rounded-lg border border-gray-300 bg-white px-3 py-2 pr-10 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    >
+                      <option value="Low">Low</option>
+                      <option value="Medium">Medium</option>
+                      <option value="High">High</option>
+                    </select>
+
+                    <ChevronDown
+                      size={18}
+                      className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-600"
+                    />
+                  </div>
                 </div>
               </div>
 
+              {/* Due Date */}
               <div>
                 <label
                   htmlFor="dueDate"
@@ -967,11 +1218,14 @@ export default function Navbar({
                   id="dueDate"
                   type="date"
                   value={dueDate}
-                  onChange={(event) => setDueDate(event.target.value)}
+                  onChange={(event) =>
+                    setDueDate(event.target.value)
+                  }
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900"
                 />
               </div>
 
+              {/* Assignee */}
               <div>
                 <label
                   htmlFor="task-assignee"
@@ -980,35 +1234,44 @@ export default function Navbar({
                   Assignee
                 </label>
 
-                <select
-                  id="task-assignee"
-                  value={assignee}
-                  onChange={(event) => setAssignee(event.target.value)}
-                  disabled={
-                    !projectId ||
-                    isLoadingMembers ||
-                    isMembersError
-                  }
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
-                >
-                  <option value="">
-                    {!projectId
-                      ? "Select a project first"
-                      : isLoadingMembers
-                        ? "Loading members..."
-                        : isMembersError
-                          ? "Could not load members"
-                          : projectMembers.length === 0
-                            ? "No members found"
-                            : "Unassigned"}
-                  </option>
-
-                  {projectMembers.map((member) => (
-                    <option key={member._id} value={member._id}>
-                      {member.name} ({member.email})
+                <div className="relative">
+                  <select
+                    id="task-assignee"
+                    value={assignee}
+                    onChange={(event) =>
+                      setAssignee(event.target.value)
+                    }
+                    disabled={
+                      !projectId ||
+                      isLoadingMembers ||
+                      isMembersError
+                    }
+                    className="w-full appearance-none rounded-lg border border-gray-300 bg-white px-3 py-2 pr-10 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
+                  >
+                    <option value="">
+                      {!projectId
+                        ? "Select a project first"
+                        : isLoadingMembers
+                          ? "Loading members..."
+                          : isMembersError
+                            ? "Could not load members"
+                            : projectMembers.length === 0
+                              ? "No members found"
+                              : "Unassigned"}
                     </option>
-                  ))}
-                </select>
+
+                    {projectMembers.map((member) => (
+                      <option key={member._id} value={member._id}>
+                        {member.name} ({member.email})
+                      </option>
+                    ))}
+                  </select>
+
+                  <ChevronDown
+                    size={18}
+                    className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-600"
+                  />
+                </div>
 
                 {isMembersError && (
                   <button
@@ -1021,6 +1284,7 @@ export default function Navbar({
                 )}
               </div>
 
+              {/* Parent Task */}
               <div>
                 <label
                   htmlFor="parent-task"
@@ -1029,30 +1293,37 @@ export default function Navbar({
                   Parent Task
                 </label>
 
-                <select
-                  id="parent-task"
-                  value={parentTask}
-                  onChange={(event) =>
-                    setParentTask(event.target.value)
-                  }
-                  disabled={
-                    isLoadingTasks ||
-                    isFetchingTasks ||
-                    isTasksError ||
-                    !projectId
-                  }
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
-                >
-                  <option value="">
-                    {parentTaskPlaceholder}
-                  </option>
-
-                  {parentTasks.map((task) => (
-                    <option key={task._id} value={task._id}>
-                      {task.title}
+                <div className="relative">
+                  <select
+                    id="parent-task"
+                    value={parentTask}
+                    onChange={(event) =>
+                      setParentTask(event.target.value)
+                    }
+                    disabled={
+                      isLoadingTasks ||
+                      isFetchingTasks ||
+                      isTasksError ||
+                      !projectId
+                    }
+                    className="w-full appearance-none rounded-lg border border-gray-300 bg-white px-3 py-2 pr-10 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
+                  >
+                    <option value="">
+                      {parentTaskPlaceholder}
                     </option>
-                  ))}
-                </select>
+
+                    {parentTasks.map((task) => (
+                      <option key={task._id} value={task._id}>
+                        {task.title}
+                      </option>
+                    ))}
+                  </select>
+
+                  <ChevronDown
+                    size={18}
+                    className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-600"
+                  />
+                </div>
 
                 {isTasksError && (
                   <button
