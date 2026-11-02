@@ -335,30 +335,27 @@ export const taskApi = createApi({
   reducerPath: "taskApi",
 
   baseQuery: fetchBaseQuery({
-    baseUrl: import.meta.env.VITE_API_URL,
-    credentials: "include",
+  baseUrl: import.meta.env.VITE_API_URL,
+  credentials: "include",
 
-    prepareHeaders: (headers, { getState }) => {
-      // First, get the token from Redux
-      const reduxToken = (getState() as RootState).auth.token;
+  prepareHeaders: (headers, { getState }) => {
+    const reduxToken = (getState() as RootState).auth.token;
 
-      // If Redux doesn't contain the token, check Local Storage
-      const storedToken =
-        typeof window !== "undefined"
-          ? localStorage.getItem("token")
-          : null;
+    const storedToken =
+      typeof window !== "undefined"
+        ? localStorage.getItem("token")
+        : null;
 
-      // Use the available token
-      const token = reduxToken || storedToken;
+    const token = reduxToken || storedToken;
 
-      // Attach JWT to every API request
-      if (token) {
-        headers.set("Authorization", `Bearer ${token}`);
-      }
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
 
-      return headers;
-    },
-  }),
+    return headers;
+  },
+}),
+
 
   tagTypes: [
     "Tasks",

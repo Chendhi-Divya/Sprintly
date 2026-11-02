@@ -1,5 +1,6 @@
 
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
+import type { RootState } from "../store/store";
 
 export interface AuthUser {
   id: string;
@@ -56,6 +57,23 @@ export const authApi = createApi({
   baseQuery: fetchBaseQuery({
     baseUrl: `${import.meta.env.VITE_API_URL}/auth`,
     credentials: "include",
+
+    prepareHeaders: (headers, { getState }) => {
+      const reduxToken = (getState() as RootState).auth.token;
+
+      const storedToken =
+        typeof window !== "undefined"
+          ? localStorage.getItem("token")
+          : null;
+
+      const token = reduxToken || storedToken;
+
+      if (token) {
+        headers.set("Authorization", `Bearer ${token}`);
+      }
+
+      return headers;
+    },
   }),
 
   tagTypes: ["Auth"],
