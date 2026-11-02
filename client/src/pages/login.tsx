@@ -80,11 +80,27 @@ export default function Login() {
 console.log("Login response:", response);
 console.log("Token received:", response.token);
 
+if (!response.token) {
+  console.error("Login response does not contain a token:", response);
+
+  setErrorMessage(
+    "Login successful, but authentication token was not received."
+  );
+
+  return;
+}
+
 dispatch(
   setCredentials({
-    token: response.token ?? "",
+    token: response.token,
     user: response.user,
   })
+);
+console.log("Redux token:", localStorage.getItem("token"));
+
+console.log(
+  "Token saved:",
+  Boolean(localStorage.getItem("token"))
 );
 
 console.log("Saved token:", localStorage.getItem("token"));
