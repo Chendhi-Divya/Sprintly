@@ -339,8 +339,19 @@ export const taskApi = createApi({
     credentials: "include",
 
     prepareHeaders: (headers, { getState }) => {
-      const token = (getState() as RootState).auth.token;
+      // First, get the token from Redux
+      const reduxToken = (getState() as RootState).auth.token;
 
+      // If Redux doesn't contain the token, check Local Storage
+      const storedToken =
+        typeof window !== "undefined"
+          ? localStorage.getItem("token")
+          : null;
+
+      // Use the available token
+      const token = reduxToken || storedToken;
+
+      // Attach JWT to every API request
       if (token) {
         headers.set("Authorization", `Bearer ${token}`);
       }
