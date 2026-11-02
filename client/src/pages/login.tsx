@@ -72,18 +72,22 @@ export default function Login() {
 
     try {
       // Step 1: Login using the updated email
-      const response = await loginUser({
-        email: data.email.trim().toLowerCase(),
-        password: data.password,
-      }).unwrap();
+     const response = await loginUser({
+  email: data.email.trim().toLowerCase(),
+  password: data.password,
+}).unwrap();
 
-      // Step 2: Save the logged-in user in Redux
-      dispatch(
-        setCredentials({
-          token: response.token ?? "",
-          user: response.user,
-        })
-      );
+console.log("Login response:", response);
+console.log("Token received:", response.token);
+
+dispatch(
+  setCredentials({
+    token: response.token ?? "",
+    user: response.user,
+  })
+);
+
+console.log("Saved token:", localStorage.getItem("token"));
 
       // Step 3: Fetch organizations
       const organizationResponse =

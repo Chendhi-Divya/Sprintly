@@ -117,7 +117,7 @@ export interface Project {
 }
 
 export interface ProjectResponse {
-  message?: string;
+  message: string;
   project: Project;
 }
 
@@ -334,20 +334,20 @@ export interface NotificationActionRequest {
 export const taskApi = createApi({
   reducerPath: "taskApi",
 
- baseQuery: fetchBaseQuery({
-  baseUrl: import.meta.env.VITE_API_URL,
-  credentials: "include",
+  baseQuery: fetchBaseQuery({
+    baseUrl: import.meta.env.VITE_API_URL,
+    credentials: "include",
 
-  prepareHeaders: (headers, { getState }) => {
-    const token = (getState() as RootState).auth.token;
+    prepareHeaders: (headers, { getState }) => {
+      const token = (getState() as RootState).auth.token;
 
-    if (token) {
-      headers.set("Authorization", `Bearer ${token}`);
-    }
+      if (token) {
+        headers.set("Authorization", `Bearer ${token}`);
+      }
 
-    return headers;
-  },
-}),
+      return headers;
+    },
+  }),
 
   tagTypes: [
     "Tasks",
@@ -427,14 +427,9 @@ export const taskApi = createApi({
         method: "PUT",
         body,
       }),
-      invalidatesTags: [
-        "Projects",
-        "Tasks",
-        "ProjectMembers",
-      ],
+      invalidatesTags: ["Projects", "Tasks", "ProjectMembers"],
     }),
 
-    // DELETE PROJECT
     deleteProject: builder.mutation<
       { message: string },
       string
@@ -443,11 +438,7 @@ export const taskApi = createApi({
         url: `/projects/${projectId}`,
         method: "DELETE",
       }),
-      invalidatesTags: [
-        "Projects",
-        "Tasks",
-        "ProjectMembers",
-      ],
+      invalidatesTags: ["Projects", "Tasks", "ProjectMembers"],
     }),
 
     getProjectMembers: builder.query<
@@ -478,29 +469,19 @@ export const taskApi = createApi({
         url: `/projects/${id}/members/${memberId}`,
         method: "DELETE",
       }),
-      invalidatesTags: [
-        "Projects",
-        "ProjectMembers",
-        "Tasks",
-      ],
+      invalidatesTags: ["Projects", "ProjectMembers", "Tasks"],
     }),
 
     // ======================================
     // ORGANIZATION ENDPOINTS
     // ======================================
 
-    getOrganizations: builder.query<
-      OrganizationsResponse,
-      void
-    >({
+    getOrganizations: builder.query<OrganizationsResponse, void>({
       query: () => "/organizations",
       providesTags: ["Organizations"],
     }),
 
-    getOrganizationById: builder.query<
-      OrganizationResponse,
-      string
-    >({
+    getOrganizationById: builder.query<OrganizationResponse, string>({
       query: (orgId) => `/organizations/${orgId}`,
       providesTags: ["Organizations"],
     }),
@@ -557,8 +538,7 @@ export const taskApi = createApi({
       OrganizationInvitationsResponse,
       string
     >({
-      query: (orgId) =>
-        `/organizations/${orgId}/invitations`,
+      query: (orgId) => `/organizations/${orgId}/invitations`,
       providesTags: ["Organizations"],
     }),
 
@@ -632,11 +612,7 @@ export const taskApi = createApi({
         url: `/organizations/${orgId}/members/${memberId}`,
         method: "DELETE",
       }),
-      invalidatesTags: [
-        "Organizations",
-        "Projects",
-        "ProjectMembers",
-      ],
+      invalidatesTags: ["Organizations", "Projects", "ProjectMembers"],
     }),
 
     // ======================================
@@ -668,7 +644,8 @@ export const taskApi = createApi({
       string
     >({
       query: (organizationId) => ({
-        url: "/notifications/read-all?organizationId=" +
+        url:
+          "/notifications/read-all?organizationId=" +
           encodeURIComponent(organizationId),
         method: "PATCH",
       }),
