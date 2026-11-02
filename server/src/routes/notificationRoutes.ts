@@ -5,7 +5,7 @@ import {
   getNotifications,
   markNotificationAsRead,
   markAllNotificationsAsRead,
-} from "../controllers/notificationController.ts.js";
+} from "../controllers/notificationController.js";
 
 import protect from "../middleware/authMiddleware.js";
 
