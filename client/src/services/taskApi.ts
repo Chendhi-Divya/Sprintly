@@ -1,5 +1,6 @@
 
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
+import type { RootState } from "../store/store";
 
 // ==========================================
 // TASK TYPES
@@ -333,10 +334,20 @@ export interface NotificationActionRequest {
 export const taskApi = createApi({
   reducerPath: "taskApi",
 
-  baseQuery: fetchBaseQuery({
-    baseUrl: import.meta.env.VITE_API_URL,
-    credentials: "include",
-  }),
+ baseQuery: fetchBaseQuery({
+  baseUrl: import.meta.env.VITE_API_URL,
+  credentials: "include",
+
+  prepareHeaders: (headers, { getState }) => {
+    const token = (getState() as RootState).auth.token;
+
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+
+    return headers;
+  },
+}),
 
   tagTypes: [
     "Tasks",
