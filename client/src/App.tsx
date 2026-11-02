@@ -1,4 +1,5 @@
-import { Routes, Route } from "react-router-dom";
+
+import { Routes, Route, Navigate } from "react-router-dom";
 import type { ComponentType } from "react";
 
 import Register from "./pages/Register";
@@ -17,12 +18,14 @@ import WorkspaceLayout from "./pages/WorkspaceLayout";
 import OrganizationSettings from "./pages/OrganizationSettings";
 import ProjectSettings from "./pages/ProjectSettings.tsx";
 
-
 const RegisterPage = Register as unknown as ComponentType;
 
 function App() {
   return (
     <Routes>
+      {/* Default route */}
+      <Route path="/" element={<Navigate to="/login" replace />} />
+
       {/* Public routes */}
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/login" element={<Login />} />
@@ -33,32 +36,11 @@ function App() {
       {/* Protected routes */}
       <Route element={<ProtectedRoute />}>
         <Route path="/organizations" element={<Organizations />} />
-
-        <Route
-          path="/organizations/create"
-          element={<CreateOrganization />}
-        />
-
-        <Route
-          path="/settings/organization"
-          element={<OrganizationSettings />}
-        />
-
-        <Route
-          path="/projects/:id/settings"
-          element={<ProjectSettings />}
-        />
-
-        <Route
-          path="/projects/create"
-          element={<CreateProject />}
-        />
-
-        <Route
-          path="/dashboard"
-          element={<WorkspaceLayout />}
-        />
-
+        <Route path="/organizations/create" element={<CreateOrganization />} />
+        <Route path="/settings/organization" element={<OrganizationSettings />} />
+        <Route path="/projects/:id/settings" element={<ProjectSettings />} />
+        <Route path="/projects/create" element={<CreateProject />} />
+        <Route path="/dashboard" element={<WorkspaceLayout />} />
         <Route
           path="/tasks"
           element={
