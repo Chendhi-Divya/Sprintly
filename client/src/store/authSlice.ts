@@ -16,11 +16,14 @@ export interface Organization {
 }
 
 interface AuthState {
+  token: string | null;
   user: User | null;
   selectedOrganization: Organization | null;
 }
 
 const initialState: AuthState = {
+  token: localStorage.getItem("token"),
+
   user: (() => {
     try {
       const savedUser = localStorage.getItem("user");
@@ -47,10 +50,16 @@ const authSlice = createSlice({
   reducers: {
     setCredentials: (
       state,
-      action: PayloadAction<{ user: User }>
+      action: PayloadAction<{ token: string; user: User }>
     ) => {
+      state.token = action.payload.token;
       state.user = action.payload.user;
-      localStorage.setItem("user", JSON.stringify(action.payload.user));
+
+      localStorage.setItem("token", action.payload.token);
+      localStorage.setItem(
+        "user",
+        JSON.stringify(action.payload.user)
+      );
     },
 
     updateUser: (
@@ -80,9 +89,11 @@ const authSlice = createSlice({
     },
 
     logout: (state) => {
+      state.token = null;
       state.user = null;
       state.selectedOrganization = null;
 
+      localStorage.removeItem("token");
       localStorage.removeItem("user");
       localStorage.removeItem("selectedOrganization");
     },

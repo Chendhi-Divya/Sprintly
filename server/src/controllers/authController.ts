@@ -4,12 +4,15 @@ import bcrypt from "bcryptjs";
 
 import User from "../models/User.js";
 import PendingUser from "../models/PendingUser.js";
+import EmailChangeOTP from "../models/EmailChangeOTP.js";
 
 import {
   registerSchema,
   verifyOTPSchema,
   loginSchema,
   resendOTPSchema,
+  changeEmailSchema,
+  verifyEmailChangeSchema,
 } from "../schemas/authSchema.js";
 
 import { generateOTP } from "../utils/generateOTP.js";
@@ -86,15 +89,22 @@ export const registerUser = async (req: Request, res: Response) => {
           otpExpiresAt,
         },
       },
-      { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
+      {
+        upsert: true,
+        new: true,
+        runValidators: true,
+        setDefaultsOnInsert: true,
+      }
     );
 
     try {
       await sendOTPEmail(email, otp);
     } catch (emailError) {
       console.error("REGISTRATION OTP EMAIL ERROR:", emailError);
+
       return res.status(503).json({
-        message: "Your details were saved, but we couldn't send the verification email. Please try again shortly.",
+        message:
+          "Your details were saved, but we couldn't send the verification email. Please try again shortly.",
         code: "VERIFICATION_EMAIL_FAILED",
       });
     }
@@ -107,7 +117,8 @@ export const registerUser = async (req: Request, res: Response) => {
 
     if ((error as any)?.code === 11000) {
       return res.status(409).json({
-        message: "An account with this email already exists. Please log in instead.",
+        message:
+          "An account with this email already exists. Please log in instead.",
       });
     }
 
@@ -179,7 +190,7 @@ export const verifyEmailOTP = async (req: Request, res: Response) => {
   }
 };
 
-// Log in without automatically creating an organization.
+// Login.
 export const loginUser = async (req: Request, res: Response) => {
   try {
     const result = loginSchema.safeParse(req.body);
@@ -192,7 +203,11 @@ export const loginUser = async (req: Request, res: Response) => {
     }
 
     const { email, password } = result.data;
-    const user = await User.findOne({ email }).select("+password");
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const user = await User.findOne({
+      email: normalizedEmail,
+    }).select("+password");
 
     if (!user) {
       return res.status(401).json({
@@ -204,6 +219,14 @@ export const loginUser = async (req: Request, res: Response) => {
       return res.status(403).json({
         message:
           "Email not verified. Please verify your email before logging in.",
+      });
+    }
+
+    if (!user.password) {
+      console.error("Password field missing for user:", user._id);
+
+      return res.status(500).json({
+        message: "Unable to verify your password.",
       });
     }
 
@@ -340,8 +363,11 @@ export const forgotPassword = async (req: Request, res: Response) => {
       });
     }
 
-    const normalizedEmail = email.trim();
-    const user = await User.findOne({ email: normalizedEmail });
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const user = await User.findOne({
+      email: normalizedEmail,
+    });
 
     if (!user) {
       return res.status(404).json({
@@ -354,8 +380,15 @@ export const forgotPassword = async (req: Request, res: Response) => {
 
     await PendingUser.findOneAndUpdate(
       { email: normalizedEmail },
-      { email: normalizedEmail, otp, otpExpiresAt },
-      { upsert: true, setDefaultsOnInsert: true }
+      {
+        email: normalizedEmail,
+        otp,
+        otpExpiresAt,
+      },
+      {
+        upsert: true,
+        setDefaultsOnInsert: true,
+      }
     );
 
     await sendOTPEmail(normalizedEmail, otp);
@@ -391,7 +424,8 @@ export const resetPassword = async (req: Request, res: Response) => {
       });
     }
 
-    const normalizedEmail = email.trim();
+    const normalizedEmail = email.trim().toLowerCase();
+
     const pendingUser = await PendingUser.findOne({
       email: normalizedEmail,
     });
@@ -409,7 +443,9 @@ export const resetPassword = async (req: Request, res: Response) => {
     }
 
     if (pendingUser.otpExpiresAt < new Date()) {
-      await PendingUser.findOneAndDelete({ email: normalizedEmail });
+      await PendingUser.findOneAndDelete({
+        email: normalizedEmail,
+      });
 
       return res.status(400).json({
         message: "OTP has expired. Please request a new OTP.",
@@ -430,7 +466,9 @@ export const resetPassword = async (req: Request, res: Response) => {
       });
     }
 
-    await PendingUser.findOneAndDelete({ email: normalizedEmail });
+    await PendingUser.findOneAndDelete({
+      email: normalizedEmail,
+    });
 
     return res.status(200).json({
       message: "Password reset successfully.",
@@ -500,3 +538,200 @@ export const updateProfile = async (
   }
 };
 
+// Request an OTP to change the authenticated user's email.
+export const requestEmailChange = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({
+        message: "Authentication required",
+      });
+    }
+
+    const result = changeEmailSchema.safeParse(req.body);
+
+    if (!result.success) {
+      return res.status(400).json({
+        message: "Invalid email address",
+        errors: result.error.flatten(),
+      });
+    }
+
+    const normalizedEmail = result.data.email;
+
+    const currentUser = await User.findById(req.userId).select("email");
+
+    if (!currentUser) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    if (currentUser.email === normalizedEmail) {
+      return res.status(400).json({
+        message: "This is already your current email address",
+      });
+    }
+
+    const existingUser = await User.findOne({
+      email: normalizedEmail,
+      _id: { $ne: req.userId },
+    });
+
+    if (existingUser) {
+      return res.status(409).json({
+        message: "This email is already registered",
+      });
+    }
+
+    const otp = generateOTP();
+    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    await EmailChangeOTP.findOneAndUpdate(
+      { userId: req.userId },
+      {
+        $set: {
+          userId: req.userId,
+          email: normalizedEmail,
+          otp,
+          otpExpiresAt,
+        },
+      },
+      {
+        upsert: true,
+        new: true,
+        runValidators: true,
+      }
+    );
+
+    try {
+      await sendOTPEmail(normalizedEmail, otp);
+    } catch (emailError) {
+      console.error("EMAIL CHANGE OTP EMAIL ERROR:", emailError);
+
+      await EmailChangeOTP.deleteOne({
+        userId: req.userId,
+      });
+
+      return res.status(503).json({
+        message: "We couldn't send the OTP. Please try again shortly.",
+      });
+    }
+
+    return res.status(200).json({
+      message: "OTP sent to your new email address.",
+    });
+  } catch (error) {
+    console.error("Request email change error:", error);
+
+    return res.status(500).json({
+      message: "Could not process your email change request",
+    });
+  }
+};
+
+// Verify OTP and update the authenticated user's email.
+export const verifyEmailChangeOTP = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({
+        message: "Authentication required",
+      });
+    }
+
+    const result = verifyEmailChangeSchema.safeParse(req.body);
+
+    if (!result.success) {
+      return res.status(400).json({
+        message: "Invalid email or OTP",
+        errors: result.error.flatten(),
+      });
+    }
+
+    const { email, otp } = result.data;
+
+    const emailChangeRequest = await EmailChangeOTP.findOne({
+      userId: req.userId,
+      email,
+    });
+
+    if (!emailChangeRequest) {
+      return res.status(404).json({
+        message:
+          "No email change request found for this address. Please request a new OTP.",
+      });
+    }
+
+    if (emailChangeRequest.otpExpiresAt < new Date()) {
+      await EmailChangeOTP.deleteOne({
+        _id: emailChangeRequest._id,
+      });
+
+      return res.status(400).json({
+        message: "OTP has expired. Please request a new OTP.",
+      });
+    }
+
+    if (emailChangeRequest.otp !== otp) {
+      return res.status(400).json({
+        message: "Invalid OTP",
+      });
+    }
+
+    const existingUser = await User.findOne({
+      email,
+      _id: { $ne: req.userId },
+    });
+
+    if (existingUser) {
+      return res.status(409).json({
+        message: "This email is already registered",
+      });
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      req.userId,
+      {
+        $set: {
+          email,
+        },
+      },
+      {
+        new: true,
+        runValidators: true,
+      }
+    ).select("name email");
+
+    if (!updatedUser) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    await EmailChangeOTP.deleteOne({
+      _id: emailChangeRequest._id,
+    });
+
+    return res.status(200).json({
+      message: "Email address updated successfully.",
+      user: getPublicUser(updatedUser),
+    });
+  } catch (error) {
+    console.error("Verify email change OTP error:", error);
+
+    if ((error as any)?.code === 11000) {
+      return res.status(409).json({
+        message: "This email is already registered",
+      });
+    }
+
+    return res.status(500).json({
+      message: "Could not verify OTP and update email",
+    });
+  }
+};

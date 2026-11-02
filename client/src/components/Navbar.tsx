@@ -17,6 +17,7 @@ import {
   ChevronDown,
   UserPen,
   LogOut,
+  Mail,
 } from "lucide-react";
 
 import { logout, updateUser } from "../store/authSlice";
@@ -25,6 +26,8 @@ import type { RootState } from "../store/store";
 import {
   useLogoutMutation,
   useUpdateProfileMutation,
+  useRequestEmailChangeMutation,
+  useVerifyEmailChangeOTPMutation,
 } from "../services/authApi";
 
 import {
@@ -112,6 +115,14 @@ export default function Navbar({
   const [profileError, setProfileError] = useState("");
   const [profileSuccess, setProfileSuccess] = useState("");
 
+  // Email change states.
+  const [isEditingEmail, setIsEditingEmail] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [emailOTP, setEmailOTP] = useState("");
+  const [isOTPSent, setIsOTPSent] = useState(false);
+  const [emailError, setEmailError] = useState("");
+  const [emailSuccess, setEmailSuccess] = useState("");
+
   const profileRef = useRef<HTMLDivElement>(null);
   const notificationsRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
@@ -135,6 +146,16 @@ export default function Navbar({
     updateProfile,
     { isLoading: isUpdatingProfile },
   ] = useUpdateProfileMutation();
+
+  const [
+    requestEmailChange,
+    { isLoading: isSendingEmailOTP },
+  ] = useRequestEmailChangeMutation();
+
+  const [
+    verifyEmailChangeOTP,
+    { isLoading: isVerifyingEmailOTP },
+  ] = useVerifyEmailChangeOTPMutation();
 
   const {
     data: projectsData,
@@ -330,17 +351,36 @@ export default function Navbar({
     setProfileError("");
     setProfileSuccess("");
 
+    setIsEditingEmail(false);
+    setNewEmail("");
+    setEmailOTP("");
+    setIsOTPSent(false);
+    setEmailError("");
+    setEmailSuccess("");
+
     setShowProfileMenu(false);
     setShowEditProfile(true);
   }
 
   // Close Edit Profile modal.
   function handleCloseEditProfile() {
-    if (isUpdatingProfile) return;
+    if (
+      isUpdatingProfile ||
+      isSendingEmailOTP ||
+      isVerifyingEmailOTP
+    ) {
+      return;
+    }
 
     setShowEditProfile(false);
     setProfileError("");
     setProfileSuccess("");
+    setIsEditingEmail(false);
+    setNewEmail("");
+    setEmailOTP("");
+    setIsOTPSent(false);
+    setEmailError("");
+    setEmailSuccess("");
   }
 
   // Save updated name.
@@ -360,9 +400,7 @@ export default function Navbar({
     }
 
     if (trimmedName.length < 2) {
-      setProfileError(
-        "Name must contain at least 2 characters."
-      );
+      setProfileError("Name must contain at least 2 characters.");
       return;
     }
 
@@ -382,15 +420,136 @@ export default function Navbar({
         })
       );
 
-      setProfileSuccess("Profile updated successfully.");
-
-      setTimeout(() => {
-        setShowEditProfile(false);
-        setProfileSuccess("");
-      }, 800);
+      setProfileName(response.user.name);
+      setProfileSuccess("Your name has been updated successfully.");
     } catch (error: unknown) {
       console.error("Profile update error:", error);
       setProfileError(getErrorMessage(error));
+    }
+  }
+
+  // Start editing email.
+  function handleStartEmailEdit() {
+    setIsEditingEmail(true);
+    setNewEmail("");
+    setEmailOTP("");
+    setIsOTPSent(false);
+    setEmailError("");
+    setEmailSuccess("");
+  }
+
+  // Cancel email editing.
+  function handleCancelEmailEdit() {
+    if (isSendingEmailOTP || isVerifyingEmailOTP) return;
+
+    setIsEditingEmail(false);
+    setNewEmail("");
+    setEmailOTP("");
+    setIsOTPSent(false);
+    setEmailError("");
+    setEmailSuccess("");
+  }
+
+  // Send OTP to the new email.
+  async function handleSendEmailOTP() {
+    setEmailError("");
+    setEmailSuccess("");
+
+    const trimmedEmail = newEmail.trim().toLowerCase();
+
+    if (!trimmedEmail) {
+      setEmailError("Please enter your new email address.");
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!emailRegex.test(trimmedEmail)) {
+      setEmailError("Please enter a valid email address.");
+      return;
+    }
+
+    if (trimmedEmail === user?.email?.toLowerCase()) {
+      setEmailError("This is already your current email address.");
+      return;
+    }
+
+    try {
+      const response = await requestEmailChange({
+        email: trimmedEmail,
+      }).unwrap();
+
+      setNewEmail(trimmedEmail);
+      setIsOTPSent(true);
+      setEmailOTP("");
+      setEmailError("");
+      setEmailSuccess(response.message);
+    } catch (error: unknown) {
+      console.error("Send email OTP error:", error);
+
+      const message = getErrorMessage(error).toLowerCase();
+
+      if (
+        message.includes("already registered") ||
+        message.includes("already exists")
+      ) {
+        // Keep the user on the new email entry screen and show the error inline.
+        setIsOTPSent(false);
+        setEmailOTP("");
+        setEmailError("User already exists");
+        setEmailSuccess("");
+
+        return;
+      }
+
+      // Show other errors normally.
+      setEmailError(getErrorMessage(error));
+    }
+  }
+
+  // Verify OTP and update email.
+  async function handleVerifyEmailOTP(
+    event: FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+
+    setEmailError("");
+    setEmailSuccess("");
+
+    const trimmedEmail = newEmail.trim().toLowerCase();
+    const trimmedOTP = emailOTP.trim();
+
+    if (!trimmedEmail) {
+      setEmailError("Please enter your new email address.");
+      return;
+    }
+
+    if (!/^\d{6}$/.test(trimmedOTP)) {
+      setEmailError("Please enter a valid 6-digit OTP.");
+      return;
+    }
+
+    try {
+      const response = await verifyEmailChangeOTP({
+        email: trimmedEmail,
+        otp: trimmedOTP,
+      }).unwrap();
+
+      dispatch(
+        updateUser({
+          email: response.user.email,
+        })
+      );
+
+      setEmailSuccess("Email address updated successfully.");
+
+      setIsEditingEmail(false);
+      setIsOTPSent(false);
+      setNewEmail("");
+      setEmailOTP("");
+    } catch (error: unknown) {
+      console.error("Verify email OTP error:", error);
+      setEmailError(getErrorMessage(error));
     }
   }
 
@@ -881,7 +1040,6 @@ export default function Navbar({
                   </div>
                 </div>
 
-                {/* Edit Profile */}
                 <button
                   type="button"
                   onClick={handleOpenEditProfile}
@@ -891,7 +1049,6 @@ export default function Navbar({
                   <span>Edit profile</span>
                 </button>
 
-                {/* Switch Organization */}
                 <button
                   type="button"
                   onClick={handleSwitchOrganization}
@@ -906,7 +1063,6 @@ export default function Navbar({
 
                 <div className="my-1 border-t border-gray-100" />
 
-                {/* Logout */}
                 <button
                   type="button"
                   onClick={() => void handleLogout()}
@@ -927,127 +1083,354 @@ export default function Navbar({
       {/* Edit Profile Modal */}
       {showEditProfile && (
         <div
-          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4"
+          className="fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-gray-950/50 p-4 backdrop-blur-sm"
           onClick={handleCloseEditProfile}
         >
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="edit-profile-title"
-            className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl"
+            className="my-auto flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="mb-5 flex items-center justify-between">
-              <div>
-                <h2
-                  id="edit-profile-title"
-                  className="text-lg font-semibold text-gray-900"
-                >
-                  Edit profile
-                </h2>
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-gray-100 px-6 py-5">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                  <UserPen size={21} />
+                </div>
 
-                <p className="mt-1 text-sm text-gray-500">
-                  Update your account information.
-                </p>
+                <div>
+                  <h2
+                    id="edit-profile-title"
+                    className="text-lg font-semibold text-gray-900"
+                  >
+                    Edit profile
+                  </h2>
+                  <p className="mt-0.5 text-sm text-gray-500">
+                    Manage your account information.
+                  </p>
+                </div>
               </div>
 
               <button
                 type="button"
                 onClick={handleCloseEditProfile}
-                disabled={isUpdatingProfile}
+                disabled={
+                  isUpdatingProfile ||
+                  isSendingEmailOTP ||
+                  isVerifyingEmailOTP
+                }
                 aria-label="Close edit profile"
-                className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 disabled:opacity-50"
+                className="rounded-lg p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
               >
-                <X size={19} />
+                <X size={20} />
               </button>
             </div>
 
-            <form
-              onSubmit={handleProfileUpdate}
-              className="space-y-4"
-            >
-              <div>
-                <label
-                  htmlFor="profile-name"
-                  className="mb-1.5 block text-sm font-medium text-gray-700"
+            {/* Scrollable content */}
+            <div className="space-y-6 overflow-y-auto px-6 py-6">
+              {/* Personal information */}
+              <section>
+                <div className="mb-4">
+                  <h3 className="text-sm font-semibold text-gray-900">
+                    Personal information
+                  </h3>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Update the name displayed on your account.
+                  </p>
+                </div>
+
+                <form
+                  onSubmit={handleProfileUpdate}
+                  className="space-y-4"
                 >
-                  Full name
-                </label>
+                  <div>
+                    <label
+                      htmlFor="profile-name"
+                      className="mb-2 block text-sm font-medium text-gray-700"
+                    >
+                      Full name
+                    </label>
 
-                <input
-                  id="profile-name"
-                  type="text"
-                  value={profileName}
-                  onChange={(event) =>
-                    setProfileName(event.target.value)
-                  }
-                  placeholder="Enter your name"
-                  maxLength={60}
-                  autoFocus
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                />
-              </div>
+                    <input
+                      id="profile-name"
+                      type="text"
+                      value={profileName}
+                      onChange={(event) => {
+                        setProfileName(event.target.value);
+                        setProfileError("");
+                        setProfileSuccess("");
+                      }}
+                      placeholder="Enter your full name"
+                      maxLength={60}
+                      autoFocus
+                      className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 hover:border-gray-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                    />
+                  </div>
 
-              <div>
-                <label
-                  htmlFor="profile-email"
-                  className="mb-1.5 block text-sm font-medium text-gray-700"
-                >
-                  Email address
-                </label>
+                  {profileError && (
+                    <div
+                      role="alert"
+                      className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700"
+                    >
+                      <X size={17} className="mt-0.5 shrink-0" />
+                      <p>{profileError}</p>
+                    </div>
+                  )}
 
-                <input
-                  id="profile-email"
-                  type="email"
-                  value={user?.email ?? ""}
-                  disabled
-                  className="w-full cursor-not-allowed rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-500"
-                />
+                  {profileSuccess && (
+                    <div
+                      role="status"
+                      className="flex items-start gap-2 rounded-xl border border-green-200 bg-green-50 px-3 py-3 text-sm text-green-700"
+                    >
+                      <Check size={17} className="mt-0.5 shrink-0" />
+                      <p>{profileSuccess}</p>
+                    </div>
+                  )}
 
-                <p className="mt-1 text-xs text-gray-400">
-                  Email address cannot be changed here.
-                </p>
-              </div>
+                  <div className="flex justify-end">
+                    <button
+                      type="submit"
+                      disabled={
+                        isUpdatingProfile ||
+                        !profileName.trim()
+                      }
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isUpdatingProfile
+                        ? "Saving..."
+                        : "Save name"}
+                    </button>
+                  </div>
+                </form>
+              </section>
 
-              {profileError && (
-                <p
-                  role="alert"
-                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
-                >
-                  {profileError}
-                </p>
-              )}
+              <div className="border-t border-gray-100" />
 
-              {profileSuccess && (
-                <p
-                  role="status"
-                  className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700"
-                >
-                  {profileSuccess}
-                </p>
-              )}
+              {/* Email address */}
+              <section>
+                <div className="mb-4">
+                  <div className="flex items-center gap-2">
+                    <Mail size={18} className="text-gray-500" />
+                    <h3 className="text-sm font-semibold text-gray-900">
+                      Email address
+                    </h3>
+                  </div>
 
-              <div className="flex justify-end gap-2 border-t border-gray-100 pt-4">
-                <button
-                  type="button"
-                  onClick={handleCloseEditProfile}
-                  disabled={isUpdatingProfile}
-                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                >
-                  Cancel
-                </button>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Your email is used for account communication and verification.
+                  </p>
+                </div>
 
-                <button
-                  type="submit"
-                  disabled={
-                    isUpdatingProfile || !profileName.trim()
-                  }
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {isUpdatingProfile ? "Saving..." : "Save changes"}
-                </button>
-              </div>
-            </form>
+                {/* Current email */}
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-gray-500">
+                      Current email address
+                    </p>
+
+                    <p className="mt-1 break-all text-sm font-medium text-gray-900">
+                      {user?.email || ""}
+                    </p>
+                  </div>
+
+                  {!isEditingEmail && (
+                    <button
+                      type="button"
+                      onClick={handleStartEmailEdit}
+                      className="shrink-0 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                    >
+                      Edit email
+                    </button>
+                  )}
+                </div>
+
+                {/* Email editing */}
+                {isEditingEmail && (
+                  <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/40 p-4">
+                    {!isOTPSent ? (
+                      <div className="space-y-4">
+                        <div>
+                          <label
+                            htmlFor="new-email"
+                            className="mb-2 block text-sm font-medium text-gray-700"
+                          >
+                            New email address
+                          </label>
+
+                          <input
+                            id="new-email"
+                            type="email"
+                            value={newEmail}
+                            onChange={(event) => {
+                              setNewEmail(event.target.value);
+                              setEmailError("");
+                              setEmailSuccess("");
+                            }}
+                            placeholder="name@example.com"
+                            autoComplete="email"
+                            className={`w-full rounded-xl border bg-white px-4 py-3 text-sm outline-none transition placeholder:text-gray-400 focus:ring-4 focus:ring-blue-500/10 ${
+                              emailError === "User already exists"
+                                ? "border-red-300 focus:border-red-500"
+                                : "border-gray-300 focus:border-blue-500"
+                            }`}
+                          />
+                          {emailError === "User already exists" && (
+                            <p role="alert" className="mt-2 text-sm text-red-600">
+                              User already exists
+                            </p>
+                          )}
+                        </div>
+
+                        <p className="text-xs leading-5 text-gray-500">
+                          We'll send a six-digit verification code to your new email address.
+                        </p>
+
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={handleCancelEmailEdit}
+                            disabled={isSendingEmailOTP}
+                            className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:opacity-50"
+                          >
+                            Cancel
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => void handleSendEmailOTP()}
+                            disabled={
+                              isSendingEmailOTP ||
+                              !newEmail.trim()
+                            }
+                            className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {isSendingEmailOTP
+                              ? "Sending..."
+                              : "Send OTP"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <form
+                        onSubmit={handleVerifyEmailOTP}
+                        className="space-y-4"
+                      >
+                        <div>
+                          <p className="text-sm font-medium text-gray-800">
+                            Verify your new email
+                          </p>
+                          <p className="mt-1 text-xs leading-5 text-gray-500">
+                            Enter the verification code sent to:
+                          </p>
+                          <p className="mt-1 break-all text-sm font-semibold text-blue-700">
+                            {newEmail.trim().toLowerCase()}
+                          </p>
+                        </div>
+
+                        <div>
+                          <label
+                            htmlFor="email-change-otp"
+                            className="mb-2 block text-sm font-medium text-gray-700"
+                          >
+                            Verification code
+                          </label>
+
+                          <input
+                            id="email-change-otp"
+                            type="text"
+                            inputMode="numeric"
+                            autoComplete="one-time-code"
+                            value={emailOTP}
+                            onChange={(event) =>
+                              setEmailOTP(
+                                event.target.value
+                                  .replace(/\D/g, "")
+                                  .slice(0, 6)
+                              )
+                            }
+                            placeholder="Enter 6-digit OTP"
+                            maxLength={6}
+                            className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-center text-lg font-semibold tracking-[0.5em] outline-none transition placeholder:text-sm placeholder:font-normal placeholder:tracking-normal focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                          />
+                        </div>
+
+                        <p className="text-xs text-gray-500">
+                          The verification code is valid for 10 minutes.
+                        </p>
+
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={handleCancelEmailEdit}
+                            disabled={isVerifyingEmailOTP}
+                            className="rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:opacity-50"
+                          >
+                            Cancel
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsOTPSent(false);
+                              setEmailOTP("");
+                              setEmailError("");
+                              setEmailSuccess("");
+                            }}
+                            disabled={isVerifyingEmailOTP}
+                            className="rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:opacity-50"
+                          >
+                            Change email
+                          </button>
+
+                          <button
+                            type="submit"
+                            disabled={
+                              isVerifyingEmailOTP ||
+                              emailOTP.trim().length !== 6
+                            }
+                            className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {isVerifyingEmailOTP
+                              ? "Verifying..."
+                              : "Verify email"}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+                )}
+
+                {/* Show errors outside the new-email field, such as OTP errors. */}
+                {emailError && emailError !== "User already exists" && (
+                  <div
+                    role="alert"
+                    className="mt-3 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700"
+                  >
+                    <X size={17} className="mt-0.5 shrink-0" />
+                    <p>{emailError}</p>
+                  </div>
+                )}
+
+                {emailSuccess && (
+                  <div
+                    role="status"
+                    className="mt-3 flex items-start gap-2 rounded-xl border border-green-200 bg-green-50 px-3 py-3 text-sm text-green-700"
+                  >
+                    <Check size={17} className="mt-0.5 shrink-0" />
+                    <p>{emailSuccess}</p>
+                  </div>
+                )}
+              </section>
+            </div>
+
+            {/* Footer - bottom Close button removed */}
+            <div className="border-t border-gray-100 bg-gray-50/80 px-6 py-4">
+              <p className="text-xs text-gray-500">
+                Your account details are kept up to date.
+              </p>
+            </div>
           </div>
         </div>
       )}

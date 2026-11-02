@@ -11,7 +11,7 @@ export default function ProtectedRoute() {
 
   useEffect(() => {
     if (user) {
-      dispatch(setCredentials({ user }));
+      dispatch(setCredentials({ token: "", user }));
     } else if (isError) {
       dispatch(logout());
     }

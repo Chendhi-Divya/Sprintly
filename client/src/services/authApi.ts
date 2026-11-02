@@ -9,7 +9,7 @@ export interface AuthUser {
 
 export interface LoginResponse {
   message: string;
-  token: string;
+  token?: string;
   user: AuthUser;
 }
 
@@ -44,6 +44,10 @@ interface ResetPasswordRequest {
   email: string;
   otp: string;
   newPassword: string;
+}
+
+interface EmailChangeResponse extends MessageResponse {
+  user: AuthUser;
 }
 
 export const authApi = createApi({
@@ -89,7 +93,10 @@ export const authApi = createApi({
       query: (data) => ({
         url: "/login",
         method: "POST",
-        body: data,
+        body: {
+          email: data.email.trim().toLowerCase(),
+          password: data.password,
+        },
       }),
       invalidatesTags: ["Auth"],
     }),
@@ -107,6 +114,34 @@ export const authApi = createApi({
         url: "/profile",
         method: "PUT",
         body: data,
+      }),
+      invalidatesTags: ["Auth"],
+    }),
+
+    requestEmailChange: builder.mutation<
+      MessageResponse,
+      EmailRequest
+    >({
+      query: (data) => ({
+        url: "/change-email",
+        method: "POST",
+        body: {
+          email: data.email.trim().toLowerCase(),
+        },
+      }),
+    }),
+
+    verifyEmailChangeOTP: builder.mutation<
+      EmailChangeResponse,
+      VerifyEmailRequest
+    >({
+      query: (data) => ({
+        url: "/verify-email-change",
+        method: "POST",
+        body: {
+          email: data.email.trim().toLowerCase(),
+          otp: data.otp,
+        },
       }),
       invalidatesTags: ["Auth"],
     }),
@@ -154,6 +189,8 @@ export const {
   useLoginMutation,
   useGetCurrentUserQuery,
   useUpdateProfileMutation,
+  useRequestEmailChangeMutation,
+  useVerifyEmailChangeOTPMutation,
   useLogoutMutation,
   useResendOTPMutation,
   useForgotPasswordMutation,

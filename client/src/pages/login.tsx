@@ -26,6 +26,8 @@ import {
 const loginSchema = z.object({
   email: z
     .string()
+    .trim()
+    .toLowerCase()
     .min(1, "Email is required")
     .email("Please enter a valid email"),
 
@@ -69,15 +71,16 @@ export default function Login() {
     setErrorMessage("");
 
     try {
-      // Step 1: Login
+      // Step 1: Login using the updated email
       const response = await loginUser({
-        email: data.email,
+        email: data.email.trim().toLowerCase(),
         password: data.password,
       }).unwrap();
 
-      // Step 2: Save logged-in user
+      // Step 2: Save the logged-in user in Redux
       dispatch(
         setCredentials({
+          token: response.token ?? "",
           user: response.user,
         })
       );
@@ -89,13 +92,13 @@ export default function Login() {
       const organizations =
         organizationResponse.organizations ?? [];
 
-      // No organizations: go to organization creation
+      // No organizations: create an organization
       if (organizations.length === 0) {
         navigate("/organizations", { replace: true });
         return;
       }
 
-      // Multiple organizations: ask user to choose
+      // Multiple organizations: choose one
       if (organizations.length > 1) {
         navigate("/organizations", { replace: true });
         return;
@@ -106,14 +109,14 @@ export default function Login() {
 
       dispatch(setSelectedOrganization(organization));
 
-      // Step 4: Fetch projects for this organization
+      // Step 4: Fetch projects
       const projectResponse = await getProjects(
         organization._id
       ).unwrap();
 
       const projects = projectResponse.projects ?? [];
 
-      // No projects: create first project
+      // No projects: create the first project
       if (projects.length === 0) {
         navigate("/projects/create", { replace: true });
         return;

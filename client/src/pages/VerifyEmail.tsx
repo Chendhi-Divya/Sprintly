@@ -179,14 +179,14 @@ export default function VerifyEmail() {
 
       // STEP 2: Save verified user credentials.
       // Include the token only if the API returns one.
-      dispatch(
-        setCredentials({
-          user: response.user,
-          ...(response.token
-            ? { token: response.token }
-            : {}),
-        })
-      );
+      if (response.token) {
+        dispatch(
+          setCredentials({
+            user: response.user,
+            token: response.token,
+          })
+        );
+      }
 
       // STEP 3: Accept invitation if the user
       // registered through an organization invite.
