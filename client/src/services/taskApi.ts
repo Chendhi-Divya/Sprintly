@@ -466,22 +466,30 @@ export const taskApi = createApi({
     baseUrl: import.meta.env.VITE_API_URL,
     credentials: "include",
 
-    prepareHeaders: (headers, { getState }) => {
-      const reduxToken = (getState() as RootState).auth.token;
+  prepareHeaders: (headers, { getState, endpoint }) => {
+  const reduxToken = (getState() as RootState).auth.token;
 
-      const storedToken =
-        typeof window !== "undefined"
-          ? localStorage.getItem("token")
-          : null;
+  const storedToken =
+    typeof window !== "undefined"
+      ? localStorage.getItem("token")
+      : null;
 
-      const token = reduxToken || storedToken;
+  const token = reduxToken || storedToken;
 
-      if (token) {
-        headers.set("Authorization", `Bearer ${token}`);
-      }
+  console.log("API endpoint:", endpoint);
+  console.log("Token available:", Boolean(token));
 
-      return headers;
-    },
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  console.log(
+    "Authorization header added:",
+    headers.has("Authorization")
+  );
+
+  return headers;
+},
   }),
 
   tagTypes: [
