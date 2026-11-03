@@ -96,6 +96,15 @@ dispatch(
     user: response.user,
   })
 );
+console.log(
+  "After login - token exists:",
+  Boolean(localStorage.getItem("token"))
+);
+
+console.log(
+  "After login - token length:",
+  localStorage.getItem("token")?.length
+);
 console.log("Redux token:", localStorage.getItem("token"));
 
 console.log(
@@ -104,6 +113,15 @@ console.log(
 );
 
 console.log("Saved token:", localStorage.getItem("token"));
+console.log(
+  "Before fetching organizations - token exists:",
+  Boolean(localStorage.getItem("token"))
+);
+
+console.log(
+  "Before fetching organizations - token length:",
+  localStorage.getItem("token")?.length
+);
 
       // Step 3: Fetch organizations
       const organizationResponse =
