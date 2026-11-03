@@ -17,6 +17,9 @@ const transporter =
           user: emailUser,
           pass: emailPass,
         },
+        connectionTimeout: 30000,
+        greetingTimeout: 30000,
+        socketTimeout: 30000,
       })
     : null;
 // Common email sending function
@@ -157,5 +160,15 @@ export const verifyEmailConnection = async () => {
     console.error("Gmail SMTP connection failed:", error);
 
     return false;
+  }
+};
+
+
+export const testEmail = async () => {
+  try {
+    await transporter?.verify();
+    console.log("Gmail SMTP is working!");
+  } catch (error) {
+    console.error("Gmail SMTP test failed:", error);
   }
 };
