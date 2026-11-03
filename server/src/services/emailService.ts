@@ -10,14 +10,15 @@ const emailPass = process.env.EMAIL_PASS;
 const transporter =
   emailUser && emailPass
     ? nodemailer.createTransport({
-        service: "gmail",
+        host: "smtp.gmail.com",
+        port: 587,
+        secure: false,
         auth: {
           user: emailUser,
           pass: emailPass,
         },
       })
     : null;
-
 // Common email sending function
 export const sendEmail = async (
   email: string,
