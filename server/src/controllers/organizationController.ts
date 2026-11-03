@@ -39,7 +39,7 @@ function getMemberRole(
   return membership?.role;
 }
 
-// Backfill missing memberships for older organizations.
+// Add missing membership records for older organizations.
 async function ensureMemberships(organization: any) {
   organization.members = organization.members ?? [];
   organization.memberships = organization.memberships ?? [];
@@ -78,7 +78,7 @@ async function ensureMemberships(organization: any) {
 
     const membershipExists = organization.memberships.some(
       (membership: any) =>
-        membership.user.toString() === memberIdString
+        membership.user?.toString() === memberIdString
     );
 
     if (!membershipExists) {
@@ -91,7 +91,7 @@ async function ensureMemberships(organization: any) {
 
   const ownerMembership = organization.memberships.find(
     (membership: any) =>
-      membership.user.toString() === adminId
+      membership.user?.toString() === adminId
   );
 
   if (ownerMembership) {
@@ -184,7 +184,8 @@ export const updateOrganization = async (
         !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(formattedSlug)
       ) {
         return res.status(400).json({
-          message: "Workspace URL must use lowercase letters, numbers, and hyphens",
+          message:
+            "Workspace URL must use lowercase letters, numbers, and hyphens",
         });
       }
 
@@ -271,7 +272,7 @@ export const updateOrganizationMemberRole = async (
     }
 
     const membership = organization.memberships.find(
-      (item: any) => item.user.toString() === memberId
+      (item: any) => item.user?.toString() === memberId
     );
 
     if (!membership) {
@@ -307,7 +308,7 @@ export const updateOrganizationMemberRole = async (
       const currentOwnerMembership =
         organization.memberships.find(
           (item: any) =>
-            item.user.toString() === currentOwnerId
+            item.user?.toString() === currentOwnerId
         );
 
       if (currentOwnerMembership) {
@@ -319,7 +320,8 @@ export const updateOrganizationMemberRole = async (
     } else {
       if (membership.role === "Owner") {
         return res.status(400).json({
-          message: "Transfer ownership before changing the current Owner's role",
+          message:
+            "Transfer ownership before changing the current Owner's role",
         });
       }
 
@@ -354,28 +356,24 @@ export const removeOrganizationMember = async (
     const memberId = routeParam(req.params.memberId);
     const userId = (req as any).userId;
 
-    // Check authentication
     if (!userId) {
       return res.status(401).json({
         message: "User not authenticated",
       });
     }
 
-    // Validate organization ID
     if (!org_id) {
       return res.status(400).json({
         message: "Organization ID is required",
       });
     }
 
-    // Validate member ID
     if (!mongoose.isValidObjectId(memberId)) {
       return res.status(400).json({
         message: "Invalid member ID",
       });
     }
 
-    // Find organization
     const organization = await Organization.findOne({ org_id });
 
     if (!organization) {
@@ -386,32 +384,27 @@ export const removeOrganizationMember = async (
 
     await ensureMemberships(organization);
 
-    // Get actor and target roles
     const actorRole = getMemberRole(organization, userId);
     const targetRole = getMemberRole(organization, memberId);
 
-    // Only Owner and Admin can remove members
     if (actorRole !== "Owner" && actorRole !== "Admin") {
       return res.status(403).json({
         message: "Only an organization Owner or Admin can remove members",
       });
     }
 
-    // Owner cannot be removed
     if (targetRole === "Owner") {
       return res.status(403).json({
         message: "The organization Owner cannot be removed",
       });
     }
 
-    // Admin cannot remove another Admin
     if (targetRole === "Admin" && actorRole !== "Owner") {
       return res.status(403).json({
         message: "Only the Owner can remove an Admin",
       });
     }
 
-    // Check whether the target is a member
     const isMember = organization.members.some(
       (member: any) => member.toString() === memberId
     );
@@ -422,12 +415,10 @@ export const removeOrganizationMember = async (
       });
     }
 
-    // Remove user from organization members
     organization.members = organization.members.filter(
       (member: any) => member.toString() !== memberId
     );
 
-    // Remove user's membership and role
     organization.memberships = organization.memberships.filter(
       (membership: any) =>
         membership.user?.toString() !== memberId
@@ -435,7 +426,6 @@ export const removeOrganizationMember = async (
 
     await organization.save();
 
-    // Remove user from all projects in this organization
     await Project.updateMany(
       {
         organization: organization.org_id,
@@ -456,10 +446,7 @@ export const removeOrganizationMember = async (
 
     return res.status(500).json({
       message: "Failed to remove member",
-      error:
-        error instanceof Error
-          ? error.message
-          : "Unknown error",
+      error: error instanceof Error ? error.message : "Unknown error",
     });
   }
 };
@@ -481,8 +468,7 @@ export const createOrganizationInvitation = async (
         ? req.body.email.trim().toLowerCase()
         : "";
 
-    const role: OrganizationRole =
-      req.body.role ?? "Member";
+    const role: OrganizationRole = req.body.role ?? "Member";
 
     if (!userId) {
       return res.status(401).json({
@@ -516,7 +502,8 @@ export const createOrganizationInvitation = async (
 
     if (actorRole !== "Owner" && actorRole !== "Admin") {
       return res.status(403).json({
-        message: "Only an organization Owner or Admin can invite members",
+        message:
+          "Only an organization Owner or Admin can invite members",
       });
     }
 
@@ -540,8 +527,10 @@ export const createOrganizationInvitation = async (
       });
     }
 
+    // Generate a secure invitation token.
     const inviteToken = randomBytes(32).toString("base64url");
 
+    // Store only the hashed token in MongoDB.
     const tokenHash = createHash("sha256")
       .update(inviteToken)
       .digest("hex");
@@ -574,6 +563,7 @@ export const createOrganizationInvitation = async (
     let emailSent = true;
 
     try {
+      // Pass all four arguments expected by emailService.
       await sendOrganizationInvitationEmail(
         email,
         organization.org_name,
@@ -582,6 +572,7 @@ export const createOrganizationInvitation = async (
       );
     } catch (emailError) {
       emailSent = false;
+
       console.error(
         "ORGANIZATION INVITATION EMAIL ERROR:",
         emailError
@@ -589,8 +580,15 @@ export const createOrganizationInvitation = async (
     }
 
     return res.status(201).json({
-      message: "Invitation created",
-      invitation,
+      message: emailSent
+        ? "Invitation created and email sent successfully"
+        : "Invitation created, but the email could not be sent",
+      invitation: {
+        _id: invitation._id,
+        email: invitation.email,
+        role: invitation.role,
+        expiresAt: invitation.expiresAt,
+      },
       emailSent,
     });
   } catch (error) {
@@ -671,7 +669,8 @@ export const createOrganizationWithFirstProject = async (
 
     if (!/^[A-Z][A-Z0-9]{1,9}$/.test(projectKey)) {
       return res.status(400).json({
-        message: "Issue key must start with a letter and contain 2–10 letters or numbers",
+        message:
+          "Issue key must start with a letter and contain 2–10 letters or numbers",
       });
     }
 
@@ -743,11 +742,11 @@ export const createOrganizationWithFirstProject = async (
     console.error("CREATE ORGANIZATION SETUP ERROR:", error);
 
     if (createdProjectId) {
-      await Project.findByIdAndDelete(
-        createdProjectId
-      ).catch((cleanupError) => {
-        console.error("PROJECT CLEANUP ERROR:", cleanupError);
-      });
+      await Project.findByIdAndDelete(createdProjectId).catch(
+        (cleanupError) => {
+          console.error("PROJECT CLEANUP ERROR:", cleanupError);
+        }
+      );
 
       await TaskCounter.deleteOne({
         _id: createdProjectId.toString(),
@@ -850,7 +849,8 @@ export const getOrganizationInvitations = async (
 
     if (role !== "Owner" && role !== "Admin") {
       return res.status(403).json({
-        message: "Only an organization Owner or Admin can view invitations",
+        message:
+          "Only an organization Owner or Admin can view invitations",
       });
     }
 
@@ -858,6 +858,7 @@ export const getOrganizationInvitations = async (
       organizationId: organization.org_id,
       expiresAt: { $gt: new Date() },
     })
+      .select("-tokenHash")
       .sort({ createdAt: -1 })
       .lean();
 
@@ -874,7 +875,7 @@ export const getOrganizationInvitations = async (
 };
 
 // --------------------------------------------------
-// ACCEPT ORGANIZATION INVITATION
+// ACCEPT ORGANIZATION INVITATION BY ID
 // --------------------------------------------------
 
 export const acceptOrganizationInvitation = async (
@@ -887,6 +888,12 @@ export const acceptOrganizationInvitation = async (
     ).select("email");
 
     const invitationId = routeParam(req.params.invitationId);
+
+    if (!mongoose.isValidObjectId(invitationId)) {
+      return res.status(400).json({
+        message: "Invalid invitation ID",
+      });
+    }
 
     const invitation = await OrganizationInvitation.findById(
       invitationId
@@ -1006,7 +1013,8 @@ export const acceptOrganizationInvitationByToken = async (
 
     if (user.email.toLowerCase() !== invitation.email) {
       return res.status(403).json({
-        message: "Register using the email address that received this invitation",
+        message:
+          "Register or sign in using the email address that received this invitation",
       });
     }
 
@@ -1041,7 +1049,7 @@ export const acceptOrganizationInvitationByToken = async (
     await invitation.deleteOne();
 
     return res.status(200).json({
-      message: "Invitation accepted",
+      message: "Invitation accepted successfully",
       organization,
     });
   } catch (error) {
@@ -1069,28 +1077,24 @@ export const revokeOrganizationInvitation = async (
     const invitationId = routeParam(req.params.invitationId);
     const userId = (req as any).userId;
 
-    // Check authentication
     if (!userId) {
       return res.status(401).json({
         message: "User not authenticated",
       });
     }
 
-    // Validate organization ID
     if (!org_id) {
       return res.status(400).json({
         message: "Organization ID is required",
       });
     }
 
-    // Validate invitation ID
     if (!mongoose.isValidObjectId(invitationId)) {
       return res.status(400).json({
         message: "Invalid invitation ID",
       });
     }
 
-    // Find organization
     const organization = await Organization.findOne({ org_id });
 
     if (!organization) {
@@ -1101,16 +1105,15 @@ export const revokeOrganizationInvitation = async (
 
     await ensureMemberships(organization);
 
-    // Check permissions before deleting anything
     const role = getMemberRole(organization, userId);
 
     if (role !== "Owner" && role !== "Admin") {
       return res.status(403).json({
-        message: "Only an organization Owner or Admin can revoke invitations",
+        message:
+          "Only an organization Owner or Admin can revoke invitations",
       });
     }
 
-    // Find invitation belonging to this organization
     const invitation = await OrganizationInvitation.findOne({
       _id: invitationId,
       organizationId: organization.org_id,
@@ -1132,10 +1135,7 @@ export const revokeOrganizationInvitation = async (
 
     return res.status(500).json({
       message: "Failed to revoke invitation",
-      error:
-        error instanceof Error
-          ? error.message
-          : "Unknown error",
+      error: error instanceof Error ? error.message : "Unknown error",
     });
   }
 };

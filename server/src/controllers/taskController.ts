@@ -67,7 +67,6 @@ async function generateFallbackProjectKey(
 
 // Make sure existing tasks have project-based keys and the counter is correct.
 async function ensureProjectTaskKeys(project: IProject): Promise<void> {
-  // Older projects may not have a project key.
   if (!project.key) {
     project.key = await generateFallbackProjectKey(project);
     await project.save();
@@ -86,13 +85,12 @@ async function ensureProjectTaskKeys(project: IProject): Promise<void> {
     `^${escapeRegex(projectKey)}-\\d+$`
   );
 
-  // Check whether any task still has an old type-based key.
   const hasLegacyKeys = projectTasks.some(
     (task) => !task.taskKey || !taskKeyPattern.test(task.taskKey)
   );
 
   if (hasLegacyKeys) {
-    // Temporarily change old keys to avoid conflicts with the unique index.
+    // Temporarily change old keys to avoid unique-index conflicts.
     for (const task of projectTasks) {
       task.taskKey = `MIG-${task._id.toString()}`;
       await task.save();
@@ -106,7 +104,6 @@ async function ensureProjectTaskKeys(project: IProject): Promise<void> {
   }
 
   // Find the highest task number currently assigned to this project.
-  // This preserves gaps when a task has been deleted.
   let highestTaskNumber = 0;
 
   for (const task of projectTasks) {
@@ -121,7 +118,6 @@ async function ensureProjectTaskKeys(project: IProject): Promise<void> {
     }
   }
 
-  // Never decrease an existing counter.
   const existingCounter = await TaskCounter.findById(
     project._id.toString()
   );
@@ -221,7 +217,6 @@ export const createTask = async (req: Request, res: Response) => {
       });
     }
 
-    // The creator must be a member of the project.
     const isMember = existingProject.members.some(
       (memberId) => memberId.toString() === userId.toString()
     );
@@ -284,12 +279,16 @@ export const createTask = async (req: Request, res: Response) => {
           message: "Parent task must belong to the same project",
         });
       }
+
+      if (parent._id.toString() === parentTask.toString()) {
+        return res.status(400).json({
+          message: "A task cannot be its own parent",
+        });
+      }
     }
 
-    // Synchronize existing task keys and the project counter.
     await ensureProjectTaskKeys(existingProject);
 
-    // Increment the counter for this project only.
     const counter = await TaskCounter.findOneAndUpdate(
       { _id: existingProject._id.toString() },
       { $inc: { seq: 1 } },
@@ -308,7 +307,6 @@ export const createTask = async (req: Request, res: Response) => {
       counter.seq
     ).padStart(2, "0")}`;
 
-    // Create the task.
     const task = await Task.create({
       taskKey,
       title: title.trim(),
@@ -323,7 +321,6 @@ export const createTask = async (req: Request, res: Response) => {
       parentTask: parentTask || undefined,
     });
 
-    // Notify the assignee when another user creates the task.
     if (assignee && assignee.toString() !== userId.toString()) {
       try {
         await Notification.create({
@@ -333,7 +330,6 @@ export const createTask = async (req: Request, res: Response) => {
           task: task._id,
         });
       } catch (notificationError) {
-        // A notification failure should not undo task creation.
         console.error(
           "CREATE TASK NOTIFICATION ERROR:",
           notificationError
@@ -345,7 +341,7 @@ export const createTask = async (req: Request, res: Response) => {
       .populate("project", "name key")
       .populate("assignee", "name email")
       .populate("reporter", "name email")
-      .populate("parentTask", "title taskKey");
+      .populate("parentTask", "title taskKey type");
 
     return res.status(201).json({
       message: "Task created successfully",
@@ -354,10 +350,7 @@ export const createTask = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("CREATE TASK ERROR:", error);
 
-    if (
-      error instanceof Error &&
-      error.name === "ValidationError"
-    ) {
+    if (error instanceof Error && error.name === "ValidationError") {
       return res.status(400).json({
         message: "Task validation failed",
         error: error.message,
@@ -401,7 +394,6 @@ export const getTasks = async (req: Request, res: Response) => {
     const pageLimit = Math.min(limit, 100);
     const skip = (page - 1) * pageLimit;
 
-    // Find all projects where the user is a member.
     const userProjects = await Project.find({
       members: userId,
     });
@@ -443,7 +435,6 @@ export const getTasks = async (req: Request, res: Response) => {
       filter.type = type;
     }
 
-    // Migrate old task keys and synchronize each project's counter.
     for (const project of userProjects) {
       await ensureProjectTaskKeys(project);
     }
@@ -454,7 +445,7 @@ export const getTasks = async (req: Request, res: Response) => {
       .populate("project", "name key")
       .populate("assignee", "name email")
       .populate("reporter", "name email")
-      .populate("parentTask", "title taskKey")
+      .populate("parentTask", "title taskKey type")
       .sort({ createdAt: 1, _id: 1 })
       .skip(skip)
       .limit(pageLimit);
@@ -484,7 +475,7 @@ export const getTasks = async (req: Request, res: Response) => {
   }
 };
 
-// GET ONE TASK
+// GET ONE TASK WITH SUBTASKS
 export const getTaskById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -499,7 +490,7 @@ export const getTaskById = async (req: Request, res: Response) => {
       .populate("project", "name key")
       .populate("assignee", "name email")
       .populate("reporter", "name email")
-      .populate("parentTask", "title taskKey");
+      .populate("parentTask", "title taskKey type");
 
     if (!task) {
       return res.status(404).json({
@@ -507,15 +498,24 @@ export const getTaskById = async (req: Request, res: Response) => {
       });
     }
 
+    // Fetch subtasks directly connected to this task.
+    const subtasks = await Task.find({
+      parentTask: task._id,
+    })
+      .populate("assignee", "name email")
+      .populate("reporter", "name email")
+      .sort({ createdAt: 1 });
+
     return res.status(200).json({
-      message: "Task fetched successfully",
+      message: "Task details fetched successfully",
       task,
+      subtasks,
     });
   } catch (error) {
-    console.error("GET TASK ERROR:", error);
+    console.error("GET TASK DETAILS ERROR:", error);
 
     return res.status(500).json({
-      message: "Failed to fetch task",
+      message: "Failed to fetch task details",
       error: error instanceof Error ? error.message : error,
     });
   }
@@ -568,7 +568,6 @@ export const updateTask = async (req: Request, res: Response) => {
       });
     }
 
-    // Only project members can update its tasks.
     const isMember = project.members.some(
       (memberId) => memberId.toString() === userId.toString()
     );
@@ -631,7 +630,6 @@ export const updateTask = async (req: Request, res: Response) => {
       });
     }
 
-    // Validate the new assignee.
     if (
       assignee !== undefined &&
       assignee !== null &&
@@ -706,7 +704,6 @@ export const updateTask = async (req: Request, res: Response) => {
 
     await task.save();
 
-    // Notify the new assignee when a task is assigned or reassigned.
     const newAssigneeId = task.assignee?.toString();
 
     if (
@@ -722,7 +719,6 @@ export const updateTask = async (req: Request, res: Response) => {
           task: task._id,
         });
       } catch (notificationError) {
-        // Keep the successful task update even if notification creation fails.
         console.error(
           "UPDATE TASK NOTIFICATION ERROR:",
           notificationError
@@ -734,7 +730,7 @@ export const updateTask = async (req: Request, res: Response) => {
       .populate("project", "name key")
       .populate("assignee", "name email")
       .populate("reporter", "name email")
-      .populate("parentTask", "title taskKey");
+      .populate("parentTask", "title taskKey type");
 
     return res.status(200).json({
       message: "Task updated successfully",
@@ -743,10 +739,7 @@ export const updateTask = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("UPDATE TASK ERROR:", error);
 
-    if (
-      error instanceof Error &&
-      error.name === "ValidationError"
-    ) {
+    if (error instanceof Error && error.name === "ValidationError") {
       return res.status(400).json({
         message: "Task validation failed",
         error: error.message,

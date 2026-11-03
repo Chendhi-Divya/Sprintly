@@ -13,6 +13,7 @@ export type TaskStatus =
   | "Done";
 
 export type TaskType = "Epic" | "Story" | "Task" | "Bug";
+
 export type TaskPriority = "Low" | "Medium" | "High";
 
 export interface TaskUser {
@@ -33,25 +34,44 @@ export interface ParentTask {
   taskKey?: string;
 }
 
+export interface TaskAttachment {
+  _id: string;
+  filename: string;
+  originalName?: string;
+  url: string;
+  mimetype?: string;
+  size?: number;
+  uploadedAt?: string;
+}
+
 export interface Task {
   _id: string;
   taskKey?: string;
   title: string;
   description?: string;
+
   type: TaskType;
   status: TaskStatus;
   priority: TaskPriority;
+
   dueDate?: string;
   createdAt?: string;
+  updatedAt?: string;
+
   parentTask?: ParentTask | string | null;
+
   assignee?: TaskUser | string | null;
   reporter?: TaskUser | string | null;
+
   project?: TaskProject | string | null;
+
+  attachments?: TaskAttachment[];
 }
 
 export interface TasksResponse {
   message?: string;
   count?: number;
+
   pagination?: {
     totalTasks: number;
     currentPage: number;
@@ -60,18 +80,18 @@ export interface TasksResponse {
     hasNextPage: boolean;
     hasPreviousPage: boolean;
   };
+
   tasks: Task[];
 }
 
-export interface UpdateTaskResponse {
-  message: string;
+export interface TaskResponse {
+  message?: string;
   task: Task;
 }
 
-export interface UpdateTaskRequest {
-  id: string;
-  status: TaskStatus;
-}
+// ==========================================
+// CREATE TASK
+// ==========================================
 
 export interface CreateTaskRequest {
   title: string;
@@ -90,6 +110,103 @@ export interface CreateTaskResponse {
 }
 
 // ==========================================
+// UPDATE TASK
+// ==========================================
+
+export interface UpdateTaskRequest {
+  id: string;
+
+  title?: string;
+  description?: string;
+
+  status?: TaskStatus;
+  priority?: TaskPriority;
+
+  assignee?: string | null;
+  parentTask?: string | null;
+  dueDate?: string | null;
+}
+
+export interface UpdateTaskResponse {
+  message: string;
+  task: Task;
+}
+
+// ==========================================
+// SUBTASK TYPES
+// ==========================================
+
+export interface CreateSubtaskRequest {
+  taskId: string;
+  title: string;
+  description?: string;
+  priority?: TaskPriority;
+  assignee?: string;
+  dueDate?: string;
+}
+
+export interface SubtasksResponse {
+  message?: string;
+  subtasks: Task[];
+}
+
+export interface CreateSubtaskResponse {
+  message: string;
+  subtask: Task;
+}
+
+// ==========================================
+// COMMENT TYPES
+// ==========================================
+
+export interface TaskComment {
+  _id: string;
+  task: string;
+  text: string;
+
+  author:
+    | TaskUser
+    | string;
+
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface TaskCommentsResponse {
+  message?: string;
+  comments: TaskComment[];
+}
+
+export interface AddTaskCommentRequest {
+  taskId: string;
+  text: string;
+}
+
+export interface AddTaskCommentResponse {
+  message: string;
+  comment: TaskComment;
+}
+
+// ==========================================
+// ATTACHMENT TYPES
+// ==========================================
+
+export interface UploadTaskAttachmentRequest {
+  taskId: string;
+  file: File;
+}
+
+export interface UploadTaskAttachmentResponse {
+  message: string;
+  attachment: TaskAttachment;
+}
+
+export interface DeleteTaskAttachmentRequest {
+  taskId: string;
+  attachmentId: string;
+}
+
+// ==========================================
 // PROJECT TYPES
 // ==========================================
 
@@ -104,12 +221,14 @@ export interface Project {
   name: string;
   key?: string;
   description?: string;
+
   organization?:
     | string
     | {
         _id?: string;
         org_id?: string;
       };
+
   organizationName?: string;
   owner?: string | ProjectUser | null;
   members?: string[];
@@ -191,9 +310,13 @@ export interface Organization {
   _id: string;
   org_id: string;
   org_name: string;
+
   admin?: string | ProjectUser | null;
+
   members?: Array<string | ProjectUser>;
+
   memberships?: OrganizationMembership[];
+
   description?: string;
   logoUrl?: string;
   slug?: string;
@@ -239,6 +362,7 @@ export interface OrganizationInvitation {
   email: string;
   role: OrganizationRole;
   createdAt: string;
+
   organization?: {
     _id?: string;
     org_id?: string;
@@ -299,12 +423,16 @@ export interface RevokeOrganizationInvitationRequest {
 export interface SprintlyNotification {
   _id: string;
   recipient: string;
+
   type: "task_assigned" | "task_updated";
+
   message: string;
+
   task?: {
     _id: string;
     title: string;
   } | null;
+
   isRead: boolean;
   createdAt: string;
   updatedAt: string;
@@ -335,27 +463,26 @@ export const taskApi = createApi({
   reducerPath: "taskApi",
 
   baseQuery: fetchBaseQuery({
-  baseUrl: import.meta.env.VITE_API_URL,
-  credentials: "include",
+    baseUrl: import.meta.env.VITE_API_URL,
+    credentials: "include",
 
-  prepareHeaders: (headers, { getState }) => {
-    const reduxToken = (getState() as RootState).auth.token;
+    prepareHeaders: (headers, { getState }) => {
+      const reduxToken = (getState() as RootState).auth.token;
 
-    const storedToken =
-      typeof window !== "undefined"
-        ? localStorage.getItem("token")
-        : null;
+      const storedToken =
+        typeof window !== "undefined"
+          ? localStorage.getItem("token")
+          : null;
 
-    const token = reduxToken || storedToken;
+      const token = reduxToken || storedToken;
 
-    if (token) {
-      headers.set("Authorization", `Bearer ${token}`);
-    }
+      if (token) {
+        headers.set("Authorization", `Bearer ${token}`);
+      }
 
-    return headers;
-  },
-}),
-
+      return headers;
+    },
+  }),
 
   tagTypes: [
     "Tasks",
@@ -363,30 +490,32 @@ export const taskApi = createApi({
     "ProjectMembers",
     "Notifications",
     "Organizations",
+    "TaskComments",
+    "TaskSubtasks",
+    "TaskAttachments",
   ],
 
   endpoints: (builder) => ({
+
     // ======================================
     // TASK ENDPOINTS
     // ======================================
 
+    // Get all tasks
     getTasks: builder.query<TasksResponse, void>({
       query: () => "/tasks",
       providesTags: ["Tasks"],
     }),
 
-    updateTask: builder.mutation<
-      UpdateTaskResponse,
-      UpdateTaskRequest
-    >({
-      query: ({ id, status }) => ({
-        url: `/tasks/${id}`,
-        method: "PUT",
-        body: { status },
-      }),
-      invalidatesTags: ["Tasks"],
+    // Get individual task
+    getTaskById: builder.query<TaskResponse, string>({
+      query: (id) => `/tasks/${id}`,
+      providesTags: (_result, _error, id) => [
+        { type: "Tasks", id },
+      ],
     }),
 
+    // Create task
     createTask: builder.mutation<
       CreateTaskResponse,
       CreateTaskRequest
@@ -396,7 +525,133 @@ export const taskApi = createApi({
         method: "POST",
         body: newTask,
       }),
+
       invalidatesTags: ["Tasks", "Notifications"],
+    }),
+
+    // Update task details and status
+    updateTask: builder.mutation<
+      UpdateTaskResponse,
+      UpdateTaskRequest
+    >({
+      query: ({ id, ...body }) => ({
+        url: `/tasks/${id}`,
+        method: "PUT",
+        body,
+      }),
+
+      invalidatesTags: (_result, _error, arg) => [
+        "Tasks",
+        { type: "Tasks", id: arg.id },
+      ],
+    }),
+
+    // ======================================
+    // SUBTASK ENDPOINTS
+    // ======================================
+
+    // Get subtasks of a task
+    getSubtasks: builder.query<
+      SubtasksResponse,
+      string
+    >({
+      query: (taskId) => `/tasks/${taskId}/subtasks`,
+
+      providesTags: (_result, _error, taskId) => [
+        { type: "TaskSubtasks", id: taskId },
+      ],
+    }),
+
+    // Create subtask
+    createSubtask: builder.mutation<
+      CreateSubtaskResponse,
+      CreateSubtaskRequest
+    >({
+      query: ({ taskId, ...body }) => ({
+        url: `/tasks/${taskId}/subtasks`,
+        method: "POST",
+        body,
+      }),
+
+      invalidatesTags: (_result, _error, arg) => [
+        "Tasks",
+        { type: "TaskSubtasks", id: arg.taskId },
+      ],
+    }),
+
+    // ======================================
+    // COMMENT ENDPOINTS
+    // ======================================
+
+    // Get task comments
+    getTaskComments: builder.query<
+      TaskCommentsResponse,
+      string
+    >({
+      query: (taskId) => `/tasks/${taskId}/comments`,
+
+      providesTags: (_result, _error, taskId) => [
+        { type: "TaskComments", id: taskId },
+      ],
+    }),
+
+    // Add comment
+    addTaskComment: builder.mutation<
+      AddTaskCommentResponse,
+      AddTaskCommentRequest
+    >({
+      query: ({ taskId, text }) => ({
+        url: `/tasks/${taskId}/comments`,
+        method: "POST",
+        body: { text },
+      }),
+
+      invalidatesTags: (_result, _error, arg) => [
+        { type: "TaskComments", id: arg.taskId },
+      ],
+    }),
+
+    // ======================================
+    // ATTACHMENT ENDPOINTS
+    // ======================================
+
+    // Upload attachment
+    uploadTaskAttachment: builder.mutation<
+      UploadTaskAttachmentResponse,
+      UploadTaskAttachmentRequest
+    >({
+      query: ({ taskId, file }) => {
+        const formData = new FormData();
+
+        formData.append("attachment", file);
+
+        return {
+          url: `/tasks/${taskId}/attachments`,
+          method: "POST",
+          body: formData,
+        };
+      },
+
+      invalidatesTags: (_result, _error, arg) => [
+        "Tasks",
+        { type: "TaskAttachments", id: arg.taskId },
+      ],
+    }),
+
+    // Delete attachment
+    deleteTaskAttachment: builder.mutation<
+      { message: string },
+      DeleteTaskAttachmentRequest
+    >({
+      query: ({ taskId, attachmentId }) => ({
+        url: `/tasks/${taskId}/attachments/${attachmentId}`,
+        method: "DELETE",
+      }),
+
+      invalidatesTags: (_result, _error, arg) => [
+        "Tasks",
+        { type: "TaskAttachments", id: arg.taskId },
+      ],
     }),
 
     // ======================================
@@ -406,6 +661,7 @@ export const taskApi = createApi({
     getProjects: builder.query<ProjectsResponse, string>({
       query: (organizationId) =>
         `/projects?organizationId=${encodeURIComponent(organizationId)}`,
+
       providesTags: ["Projects"],
     }),
 
@@ -423,6 +679,7 @@ export const taskApi = createApi({
         method: "POST",
         body,
       }),
+
       invalidatesTags: ["Projects"],
     }),
 
@@ -435,7 +692,12 @@ export const taskApi = createApi({
         method: "PUT",
         body,
       }),
-      invalidatesTags: ["Projects", "Tasks", "ProjectMembers"],
+
+      invalidatesTags: [
+        "Projects",
+        "Tasks",
+        "ProjectMembers",
+      ],
     }),
 
     deleteProject: builder.mutation<
@@ -446,14 +708,21 @@ export const taskApi = createApi({
         url: `/projects/${projectId}`,
         method: "DELETE",
       }),
-      invalidatesTags: ["Projects", "Tasks", "ProjectMembers"],
+
+      invalidatesTags: [
+        "Projects",
+        "Tasks",
+        "ProjectMembers",
+      ],
     }),
 
     getProjectMembers: builder.query<
       ProjectMembersResponse,
       string
     >({
-      query: (projectId) => `/projects/${projectId}/members`,
+      query: (projectId) =>
+        `/projects/${projectId}/members`,
+
       providesTags: ["ProjectMembers"],
     }),
 
@@ -466,7 +735,11 @@ export const taskApi = createApi({
         method: "POST",
         body: { userId },
       }),
-      invalidatesTags: ["Projects", "ProjectMembers"],
+
+      invalidatesTags: [
+        "Projects",
+        "ProjectMembers",
+      ],
     }),
 
     removeProjectMember: builder.mutation<
@@ -477,19 +750,30 @@ export const taskApi = createApi({
         url: `/projects/${id}/members/${memberId}`,
         method: "DELETE",
       }),
-      invalidatesTags: ["Projects", "ProjectMembers", "Tasks"],
+
+      invalidatesTags: [
+        "Projects",
+        "ProjectMembers",
+        "Tasks",
+      ],
     }),
 
     // ======================================
     // ORGANIZATION ENDPOINTS
     // ======================================
 
-    getOrganizations: builder.query<OrganizationsResponse, void>({
+    getOrganizations: builder.query<
+      OrganizationsResponse,
+      void
+    >({
       query: () => "/organizations",
       providesTags: ["Organizations"],
     }),
 
-    getOrganizationById: builder.query<OrganizationResponse, string>({
+    getOrganizationById: builder.query<
+      OrganizationResponse,
+      string
+    >({
       query: (orgId) => `/organizations/${orgId}`,
       providesTags: ["Organizations"],
     }),
@@ -503,6 +787,7 @@ export const taskApi = createApi({
         method: "POST",
         body,
       }),
+
       invalidatesTags: ["Organizations"],
     }),
 
@@ -515,7 +800,11 @@ export const taskApi = createApi({
         method: "POST",
         body,
       }),
-      invalidatesTags: ["Organizations", "Projects"],
+
+      invalidatesTags: [
+        "Organizations",
+        "Projects",
+      ],
     }),
 
     updateOrganization: builder.mutation<
@@ -527,6 +816,7 @@ export const taskApi = createApi({
         method: "PATCH",
         body,
       }),
+
       invalidatesTags: ["Organizations"],
     }),
 
@@ -546,7 +836,9 @@ export const taskApi = createApi({
       OrganizationInvitationsResponse,
       string
     >({
-      query: (orgId) => `/organizations/${orgId}/invitations`,
+      query: (orgId) =>
+        `/organizations/${orgId}/invitations`,
+
       providesTags: ["Organizations"],
     }),
 
@@ -559,6 +851,7 @@ export const taskApi = createApi({
         method: "POST",
         body,
       }),
+
       invalidatesTags: ["Organizations"],
     }),
 
@@ -570,7 +863,11 @@ export const taskApi = createApi({
         url: `/organizations/invitations/${invitationId}/accept`,
         method: "PATCH",
       }),
-      invalidatesTags: ["Organizations", "Projects"],
+
+      invalidatesTags: [
+        "Organizations",
+        "Projects",
+      ],
     }),
 
     acceptOrganizationInvitationByToken: builder.mutation<
@@ -582,7 +879,11 @@ export const taskApi = createApi({
         method: "POST",
         body,
       }),
-      invalidatesTags: ["Organizations", "Projects"],
+
+      invalidatesTags: [
+        "Organizations",
+        "Projects",
+      ],
     }),
 
     revokeOrganizationInvitation: builder.mutation<
@@ -593,6 +894,7 @@ export const taskApi = createApi({
         url: `/organizations/${orgId}/invitations/${invitationId}`,
         method: "DELETE",
       }),
+
       invalidatesTags: ["Organizations"],
     }),
 
@@ -609,6 +911,7 @@ export const taskApi = createApi({
         method: "PATCH",
         body: { role },
       }),
+
       invalidatesTags: ["Organizations"],
     }),
 
@@ -620,7 +923,12 @@ export const taskApi = createApi({
         url: `/organizations/${orgId}/members/${memberId}`,
         method: "DELETE",
       }),
-      invalidatesTags: ["Organizations", "Projects", "ProjectMembers"],
+
+      invalidatesTags: [
+        "Organizations",
+        "Projects",
+        "ProjectMembers",
+      ],
     }),
 
     // ======================================
@@ -633,6 +941,7 @@ export const taskApi = createApi({
     >({
       query: (organizationId) =>
         `/notifications?organizationId=${encodeURIComponent(organizationId)}`,
+
       providesTags: ["Notifications"],
     }),
 
@@ -644,6 +953,7 @@ export const taskApi = createApi({
         url: `/notifications/${id}/read?organizationId=${encodeURIComponent(organizationId)}`,
         method: "PATCH",
       }),
+
       invalidatesTags: ["Notifications"],
     }),
 
@@ -655,8 +965,10 @@ export const taskApi = createApi({
         url:
           "/notifications/read-all?organizationId=" +
           encodeURIComponent(organizationId),
+
         method: "PATCH",
       }),
+
       invalidatesTags: ["Notifications"],
     }),
   }),
@@ -669,8 +981,21 @@ export const taskApi = createApi({
 export const {
   // Tasks
   useGetTasksQuery,
+  useGetTaskByIdQuery,
   useUpdateTaskMutation,
   useCreateTaskMutation,
+
+  // Subtasks
+  useGetSubtasksQuery,
+  useCreateSubtaskMutation,
+
+  // Comments
+  useGetTaskCommentsQuery,
+  useAddTaskCommentMutation,
+
+  // Attachments
+  useUploadTaskAttachmentMutation,
+  useDeleteTaskAttachmentMutation,
 
   // Projects
   useGetProjectsQuery,
@@ -707,4 +1032,5 @@ export const {
   useGetNotificationsQuery,
   useMarkNotificationAsReadMutation,
   useMarkAllNotificationsAsReadMutation,
+
 } = taskApi;

@@ -4,31 +4,36 @@ import nodemailer from "nodemailer";
 
 dotenv.config();
 
-// Nodemailer transporter using Resend SMTP
-const transporter = nodemailer.createTransport({
-  host: "smtp.resend.com",
-  port: 2465,
-  secure: true,
-  auth: {
-    user: "resend",
-    pass: process.env.RESEND_API_KEY || "",
-  },
-});
+const emailUser = process.env.EMAIL_USER;
+const emailPass = process.env.EMAIL_PASS;
+
+const transporter =
+  emailUser && emailPass
+    ? nodemailer.createTransport({
+        service: "gmail",
+        auth: {
+          user: emailUser,
+          pass: emailPass,
+        },
+      })
+    : null;
 
 // Common email sending function
-const sendEmail = async (
+export const sendEmail = async (
   email: string,
   subject: string,
   html: string,
   text?: string
 ) => {
-  if (!process.env.RESEND_API_KEY) {
-    throw new Error("RESEND_API_KEY is missing");
-  }
-
   try {
+    if (!transporter || !emailUser || !emailPass) {
+      throw new Error(
+        "EMAIL_USER or EMAIL_PASS is missing in server/.env"
+      );
+    }
+
     const info = await transporter.sendMail({
-      from: "Sprintly <onboarding@resend.dev>",
+      from: `Sprintly <${emailUser}>`,
       to: email,
       subject,
       html,
@@ -39,87 +44,117 @@ const sendEmail = async (
 
     return info;
   } catch (error) {
-    console.error("Nodemailer email sending failed:", error);
+    console.error("Email sending failed:", error);
     throw error;
   }
 };
 
-// Send OTP verification email
+// Registration, resend OTP and other OTP emails
 export const sendOTPEmail = async (
   email: string,
   otp: string
 ) => {
-  await sendEmail(
-    email,
-    "Sprintly Email Verification",
-    `
-      <h2>Welcome to Sprintly!</h2>
+  const subject = "Sprintly Email Verification";
 
+  const html = `
+    <div style="font-family: Arial, sans-serif; padding: 20px;">
+      <h2>Verify Your Email - Sprintly</h2>
       <p>Your verification OTP is:</p>
-
-      <h1>${otp}</h1>
-
+      <h1 style="letter-spacing: 5px;">${otp}</h1>
       <p>This OTP will expire in 10 minutes.</p>
+      <p>If you did not request this, please ignore this email.</p>
+    </div>
+  `;
 
-      <p>
-        If you did not create a Sprintly account,
-        please ignore this email.
-      </p>
-    `,
-    `Welcome to Sprintly! Your verification OTP is ${otp}. This OTP will expire in 10 minutes.`
-  );
+  const text = `
+    Your Sprintly verification OTP is ${otp}.
+    This OTP will expire in 10 minutes.
+  `;
+
+  return sendEmail(email, subject, html, text);
 };
 
-// Send organization invitation email
+// Organization invitation email
 export const sendOrganizationInvitationEmail = async (
   email: string,
   organizationName: string,
   role: string,
   inviteToken: string
 ) => {
-  const registrationUrl = new URL(
-    "/register",
-    process.env.CLIENT_URL || "http://localhost:5173"
-  );
+  const clientUrl =
+    process.env.CLIENT_URL || "http://localhost:5173";
 
-  registrationUrl.hash = new URLSearchParams({
-    invite: inviteToken,
-  }).toString();
+  const invitationBaseUrl =
+    process.env.INVITATION_ACCEPT_URL ||
+    `${clientUrl.replace(/\/$/, "")}/accept-invitation`;
 
-  // Escape HTML characters
-  const escapeHtml = (value: string) =>
-    value
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#39;");
+  const separator = invitationBaseUrl.includes("?") ? "&" : "?";
 
-  const safeOrganizationName = escapeHtml(organizationName);
-  const safeRole = escapeHtml(role);
+  const invitationLink =
+    `${invitationBaseUrl}${separator}token=${encodeURIComponent(inviteToken)}`;
 
-  const safeRegistrationUrl = escapeHtml(
-    registrationUrl.toString()
-  );
+  const subject = `Invitation to join ${organizationName} on Sprintly`;
 
-  await sendEmail(
-    email,
-    `Invitation to join ${organizationName} on Sprintly`,
-    `
-      <h2>You have been invited to Sprintly!</h2>
+  const html = `
+    <div style="font-family: Arial, sans-serif; padding: 20px;">
+      <h2>You're invited to Sprintly!</h2>
 
       <p>
         You have been invited to join
-        <strong>${safeOrganizationName}</strong>
-        as a <strong>${safeRole}</strong>.
+        <strong>${organizationName}</strong>
+        as a <strong>${role}</strong>.
       </p>
 
-      <p>
-        <a href="${safeRegistrationUrl}">
-          Register and join the organization
-        </a>
-      </p>
-    `,
-    `You have been invited to join ${organizationName} on Sprintly as a ${role}. Register using the invited email address and accept the invitation here: ${registrationUrl.toString()}`
-  );
+      <p>Click below to accept your invitation:</p>
+
+      <a
+        href="${invitationLink}"
+        style="
+          display: inline-block;
+          padding: 10px 20px;
+          background: #2563eb;
+          color: white;
+          text-decoration: none;
+          border-radius: 5px;
+        "
+      >
+        Accept Invitation
+      </a>
+
+      <p>This invitation expires in 7 days.</p>
+    </div>
+  `;
+
+  const text = `
+    You have been invited to join ${organizationName} on Sprintly
+    as a ${role}.
+
+    Accept your invitation here:
+    ${invitationLink}
+
+    This invitation expires in 7 days.
+  `;
+
+  return sendEmail(email, subject, html, text);
+};
+
+// Test Gmail SMTP connection
+export const verifyEmailConnection = async () => {
+  try {
+    if (!transporter) {
+      throw new Error(
+        "EMAIL_USER or EMAIL_PASS is missing in server/.env"
+      );
+    }
+
+    await transporter.verify();
+
+    console.log("Gmail SMTP connection successful!");
+
+    return true;
+  } catch (error) {
+    console.error("Gmail SMTP connection failed:", error);
+
+    return false;
+  }
 };

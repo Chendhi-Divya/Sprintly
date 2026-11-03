@@ -1,3 +1,4 @@
+
 import express from "express";
 
 import {
@@ -32,14 +33,15 @@ router.get(
   getTasks
 );
 
-// Get a single task by ID
+// Get a single task with its details and subtasks
 router.get(
   "/:id",
   protect,
+  checkTaskProjectMember,
   getTaskById
 );
 
-// Update a task, including its status
+// Update a task, including its status and description
 router.put(
   "/:id",
   protect,

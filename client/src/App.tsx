@@ -40,7 +40,9 @@ function App() {
         <Route path="/settings/organization" element={<OrganizationSettings />} />
         <Route path="/projects/:id/settings" element={<ProjectSettings />} />
         <Route path="/projects/create" element={<CreateProject />} />
+
         <Route path="/dashboard" element={<WorkspaceLayout />} />
+
         <Route
           path="/tasks"
           element={
@@ -50,6 +52,7 @@ function App() {
             </>
           }
         />
+
       </Route>
     </Routes>
   );

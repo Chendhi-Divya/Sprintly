@@ -96,18 +96,17 @@ export const registerUser = async (req: Request, res: Response) => {
         setDefaultsOnInsert: true,
       }
     );
+try {
+  await sendOTPEmail(email, otp);
+} catch (emailError) {
+  console.error("REGISTRATION OTP EMAIL ERROR:", emailError);
 
-    try {
-      await sendOTPEmail(email, otp);
-    } catch (emailError) {
-      console.error("REGISTRATION OTP EMAIL ERROR:", emailError);
-
-      return res.status(503).json({
-        message:
-          "Your details were saved, but we couldn't send the verification email. Please try again shortly.",
-        code: "VERIFICATION_EMAIL_FAILED",
-      });
-    }
+  return res.status(503).json({
+    message:
+      "Your details were saved, but we couldn't send the verification email. Please try again shortly.",
+    code: "VERIFICATION_EMAIL_FAILED",
+  });
+}
 
     return res.status(201).json({
       message: "Registration successful. OTP sent to your email.",
