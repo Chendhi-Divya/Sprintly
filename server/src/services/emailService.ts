@@ -1,4 +1,3 @@
-
 import dotenv from "dotenv";
 import nodemailer from "nodemailer";
 
@@ -7,20 +6,24 @@ dotenv.config();
 const emailUser = process.env.EMAIL_USER;
 const emailPass = process.env.EMAIL_PASS;
 
+const smtpConfig = {
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false,
+  family: 4,
+  auth: {
+    user: emailUser,
+    pass: emailPass,
+  },
+  connectionTimeout: 30000,
+  greetingTimeout: 30000,
+  socketTimeout: 30000,
+};
+
+// Explicitly specify the SMTP transport type
 const transporter =
   emailUser && emailPass
-    ? nodemailer.createTransport({
-        host: "smtp.gmail.com",
-        port: 587,
-        secure: false,
-        auth: {
-          user: emailUser,
-          pass: emailPass,
-        },
-        connectionTimeout: 30000,
-        greetingTimeout: 30000,
-        socketTimeout: 30000,
-      })
+    ? nodemailer.createTransport(smtpConfig)
     : null;
 // Common email sending function
 export const sendEmail = async (
@@ -163,10 +166,15 @@ export const verifyEmailConnection = async () => {
   }
 };
 
-
+// Optional SMTP connection test
 export const testEmail = async () => {
   try {
-    await transporter?.verify();
+    if (!transporter) {
+      throw new Error("Email configuration is missing");
+    }
+
+    await transporter.verify();
+
     console.log("Gmail SMTP is working!");
   } catch (error) {
     console.error("Gmail SMTP test failed:", error);
