@@ -1,17 +1,24 @@
 
 import dotenv from "dotenv";
-import { Resend } from "resend";
+import nodemailer from "nodemailer";
 
 dotenv.config();
 
-const resendApiKey = process.env.RESEND_API_KEY;
+const emailUser = process.env.EMAIL_USER;
+const emailPass = process.env.EMAIL_PASS;
 
-const resend = resendApiKey
-  ? new Resend(resendApiKey)
-  : null;
-
-const fromEmail =
-  process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev";
+const transporter =
+  emailUser && emailPass
+    ? nodemailer.createTransport({
+        host: "smtp.gmail.com",
+        port: 465,
+        secure: true,
+        auth: {
+          user: emailUser,
+          pass: emailPass,
+        },
+      })
+    : null;
 
 // Common email sending function
 export const sendEmail = async (
@@ -21,28 +28,23 @@ export const sendEmail = async (
   text?: string
 ) => {
   try {
-    if (!resend || !fromEmail) {
+    if (!transporter || !emailUser) {
       throw new Error(
-        "RESEND_API_KEY or RESEND_FROM_EMAIL is missing"
+        "EMAIL_USER or EMAIL_PASS is missing"
       );
     }
 
-    const { data, error } = await resend.emails.send({
-      from: `Sprintly <${fromEmail}>`,
-      to: [email],
+    const info = await transporter.sendMail({
+      from: `Sprintly <${emailUser}>`,
+      to: email,
       subject,
       html,
       ...(text ? { text } : {}),
     });
 
-    if (error) {
-      console.error("Resend email error:", error);
-      throw new Error(error.message);
-    }
+    console.log("Email sent successfully:", info.messageId);
 
-    console.log("Email sent successfully:", data?.id);
-
-    return data;
+    return info;
   } catch (error) {
     console.error("Email sending failed:", error);
     throw error;
@@ -139,15 +141,22 @@ export const sendOrganizationInvitationEmail = async (
   return sendEmail(email, subject, html, text);
 };
 
-// Check Resend configuration
+// Check Gmail SMTP connection
 export const verifyEmailConnection = async () => {
-  if (!resend || !fromEmail) {
-    console.error("Resend email configuration is missing");
+  try {
+    if (!transporter) {
+      console.error("Gmail email configuration is missing");
+      return false;
+    }
+
+    await transporter.verify();
+
+    console.log("Gmail SMTP connection successful!");
+    return true;
+  } catch (error) {
+    console.error("Gmail SMTP connection failed:", error);
     return false;
   }
-
-  console.log("Resend email configuration found!");
-  return true;
 };
 
 // Configuration test
@@ -155,6 +164,6 @@ export const testEmail = async () => {
   const configured = await verifyEmailConnection();
 
   if (configured) {
-    console.log("Resend email service is ready!");
+    console.log("Nodemailer email service is ready!");
   }
 };
