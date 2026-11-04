@@ -7,6 +7,9 @@ dotenv.config();
 const emailUser = process.env.EMAIL_USER;
 const emailPass = process.env.EMAIL_PASS;
 
+const emailProvider = process.env.EMAIL_PROVIDER || "nodemailer";
+
+// Gmail SMTP transporter for local development
 const transporter =
   emailUser && emailPass
     ? nodemailer.createTransport({
@@ -20,6 +23,56 @@ const transporter =
       })
     : null;
 
+// Production email service using Google Apps Script
+const sendUsingAppsScript = async (
+  email: string,
+  subject: string,
+  html: string,
+  text?: string
+) => {
+  const scriptUrl = process.env.GOOGLE_SCRIPT_URL;
+  const secret = process.env.GOOGLE_SCRIPT_SECRET;
+
+  if (!scriptUrl || !secret) {
+    throw new Error("Google Apps Script configuration is missing");
+  }
+
+  const response = await fetch(scriptUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      secret,
+      to: email,
+      subject,
+      html,
+      text,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Google Apps Script request failed: ${response.status}`
+    );
+  }
+
+  const result = (await response.json()) as {
+    success: boolean;
+    message?: string;
+  };
+
+  if (!result.success) {
+    throw new Error(
+      result.message || "Google Apps Script could not send the email"
+    );
+  }
+
+  console.log("Email sent successfully through Google Apps Script");
+
+  return result;
+};
+
 // Common email sending function
 export const sendEmail = async (
   email: string,
@@ -28,23 +81,31 @@ export const sendEmail = async (
   text?: string
 ) => {
   try {
-    if (!transporter || !emailUser) {
-      throw new Error(
-        "EMAIL_USER or EMAIL_PASS is missing"
-      );
+    // Production: Google Apps Script
+    if (emailProvider === "apps-script") {
+      return await sendUsingAppsScript(email, subject, html, text);
     }
 
-    const info = await transporter.sendMail({
-      from: `Sprintly <${emailUser}>`,
-      to: email,
-      subject,
-      html,
-      ...(text ? { text } : {}),
-    });
+    // Local development: Nodemailer
+    if (emailProvider === "nodemailer") {
+      if (!transporter || !emailUser) {
+        throw new Error("EMAIL_USER or EMAIL_PASS is missing");
+      }
 
-    console.log("Email sent successfully:", info.messageId);
+      const info = await transporter.sendMail({
+        from: `Sprintly <${emailUser}>`,
+        to: email,
+        subject,
+        html,
+        ...(text ? { text } : {}),
+      });
 
-    return info;
+      console.log("Email sent successfully:", info.messageId);
+
+      return info;
+    }
+
+    throw new Error(`Unsupported email provider: ${emailProvider}`);
   } catch (error) {
     console.error("Email sending failed:", error);
     throw error;
@@ -141,20 +202,38 @@ export const sendOrganizationInvitationEmail = async (
   return sendEmail(email, subject, html, text);
 };
 
-// Check Gmail SMTP connection
+// Check email service configuration
 export const verifyEmailConnection = async () => {
   try {
-    if (!transporter) {
-      console.error("Gmail email configuration is missing");
-      return false;
+    if (emailProvider === "apps-script") {
+      const configured = Boolean(
+        process.env.GOOGLE_SCRIPT_URL &&
+        process.env.GOOGLE_SCRIPT_SECRET
+      );
+
+      if (!configured) {
+        console.error("Google Apps Script configuration is missing");
+      }
+
+      return configured;
     }
 
-    await transporter.verify();
+    if (emailProvider === "nodemailer") {
+      if (!transporter) {
+        console.error("Gmail email configuration is missing");
+        return false;
+      }
 
-    console.log("Gmail SMTP connection successful!");
-    return true;
+      await transporter.verify();
+
+      console.log("Gmail SMTP connection successful!");
+      return true;
+    }
+
+    console.error(`Unsupported email provider: ${emailProvider}`);
+    return false;
   } catch (error) {
-    console.error("Gmail SMTP connection failed:", error);
+    console.error("Email service check failed:", error);
     return false;
   }
 };
@@ -164,6 +243,6 @@ export const testEmail = async () => {
   const configured = await verifyEmailConnection();
 
   if (configured) {
-    console.log("Nodemailer email service is ready!");
+    console.log(`Email service is configured: ${emailProvider}`);
   }
 };
