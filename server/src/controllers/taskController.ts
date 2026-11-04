@@ -6,6 +6,7 @@ import Project, { type IProject } from "../models/project.js";
 import TaskCounter from "../models/taskCounter.js";
 import Notification from "../models/Notification.js";
 import Organization from "../models/Organization.js";
+import TaskComment from "../models/TaskComment.js";
 
 // Escape special characters before using user input in a regular expression.
 const escapeRegex = (value: string): string =>
@@ -136,6 +137,86 @@ async function ensureProjectTaskKeys(project: IProject): Promise<void> {
   );
 }
 
+// Validate that assigning a parent will not create a circular relationship.
+async function validateParentTask(
+  taskId: string,
+  parentTaskId: string,
+  projectId: string
+): Promise<{ valid: boolean; message?: string }> {
+  if (!mongoose.isValidObjectId(parentTaskId)) {
+    return {
+      valid: false,
+      message: "Invalid parent task ID",
+    };
+  }
+
+  if (taskId === parentTaskId) {
+    return {
+      valid: false,
+      message: "A task cannot be its own parent",
+    };
+  }
+
+  const parent = await Task.findById(parentTaskId);
+
+  if (!parent) {
+    return {
+      valid: false,
+      message: "Parent task not found",
+    };
+  }
+
+  if (parent.project.toString() !== projectId) {
+    return {
+      valid: false,
+      message: "Parent task must belong to the same project",
+    };
+  }
+
+  // Follow the selected parent's ancestors.
+  // If the current task is found, assigning this parent creates a cycle.
+  let currentParentId = parent.parentTask?.toString();
+  const visited = new Set<string>();
+
+  while (currentParentId) {
+    if (currentParentId === taskId) {
+      return {
+        valid: false,
+        message: "This parent assignment would create a circular relationship",
+      };
+    }
+
+    // Prevent an infinite loop if existing data already contains a cycle.
+    if (visited.has(currentParentId)) {
+      return {
+        valid: false,
+        message: "The selected parent has an invalid parent relationship",
+      };
+    }
+
+    visited.add(currentParentId);
+
+    const ancestor = await Task.findById(currentParentId).select(
+      "parentTask project"
+    );
+
+    if (!ancestor) {
+      break;
+    }
+
+    if (ancestor.project.toString() !== projectId) {
+      return {
+        valid: false,
+        message: "Parent hierarchy must belong to the same project",
+      };
+    }
+
+    currentParentId = ancestor.parentTask?.toString();
+  }
+
+  return { valid: true };
+}
+
 // CREATE TASK
 export const createTask = async (req: Request, res: Response) => {
   try {
@@ -181,14 +262,12 @@ export const createTask = async (req: Request, res: Response) => {
       "Story",
       "Task",
       "Bug",
-      "Sub-task",
     ];
 
     const allowedPriorities = [
       "Low",
       "Medium",
       "High",
-      "Urgent",
     ];
 
     if (!allowedTypes.includes(type)) {
@@ -274,15 +353,9 @@ export const createTask = async (req: Request, res: Response) => {
         });
       }
 
-      if (parent.project.toString() !== project.toString()) {
+      if (parent.project.toString() !== existingProject._id.toString()) {
         return res.status(400).json({
           message: "Parent task must belong to the same project",
-        });
-      }
-
-      if (parent._id.toString() === parentTask.toString()) {
-        return res.status(400).json({
-          message: "A task cannot be its own parent",
         });
       }
     }
@@ -533,6 +606,7 @@ export const updateTask = async (req: Request, res: Response) => {
       status,
       priority,
       assignee,
+      parentTask,
       dueDate,
     } = req.body;
 
@@ -597,7 +671,6 @@ export const updateTask = async (req: Request, res: Response) => {
       "Low",
       "Medium",
       "High",
-      "Urgent",
     ];
 
     if (
@@ -630,6 +703,7 @@ export const updateTask = async (req: Request, res: Response) => {
       });
     }
 
+    // Validate the new assignee.
     if (
       assignee !== undefined &&
       assignee !== null &&
@@ -660,6 +734,26 @@ export const updateTask = async (req: Request, res: Response) => {
       if (!belongsToOrganization) {
         return res.status(403).json({
           message: "Assignee must belong to the project's organization",
+        });
+      }
+    }
+
+    // Validate the new parent task.
+    // null or an empty string removes the existing parent.
+    if (
+      parentTask !== undefined &&
+      parentTask !== null &&
+      parentTask !== ""
+    ) {
+      const parentValidation = await validateParentTask(
+        task._id.toString(),
+        parentTask.toString(),
+        task.project.toString()
+      );
+
+      if (!parentValidation.valid) {
+        return res.status(400).json({
+          message: parentValidation.message,
         });
       }
     }
@@ -698,6 +792,15 @@ export const updateTask = async (req: Request, res: Response) => {
       }
     }
 
+    // Update or remove the parent task.
+    if (parentTask !== undefined) {
+      if (parentTask === null || parentTask === "") {
+        task.set("parentTask", null);
+      } else {
+        task.parentTask = parentTask;
+      }
+    }
+
     if (dueDate !== undefined) {
       task.dueDate = dueDate || undefined;
     }
@@ -706,6 +809,7 @@ export const updateTask = async (req: Request, res: Response) => {
 
     const newAssigneeId = task.assignee?.toString();
 
+    // Notify the newly assigned user.
     if (
       newAssigneeId &&
       newAssigneeId !== previousAssigneeId &&
@@ -810,6 +914,172 @@ export const deleteTask = async (req: Request, res: Response) => {
 
     return res.status(500).json({
       message: "Failed to delete task",
+      error: error instanceof Error ? error.message : error,
+    });
+  }
+};
+
+// GET COMMENTS FOR A TASK
+export const getTaskComments = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).userId;
+    const { id } = req.params;
+
+    if (!userId) {
+      return res.status(401).json({
+        message: "User is not authenticated",
+      });
+    }
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({
+        message: "Invalid task ID",
+      });
+    }
+
+    const task = await Task.findById(id);
+
+    if (!task) {
+      return res.status(404).json({
+        message: "Task not found",
+      });
+    }
+
+    const project = await Project.findById(task.project);
+
+    if (!project) {
+      return res.status(404).json({
+        message: "Project not found",
+      });
+    }
+
+    const isMember = project.members.some(
+      (memberId) => memberId.toString() === userId.toString()
+    );
+
+    if (!isMember) {
+      return res.status(403).json({
+        message: "You are not a member of this project",
+      });
+    }
+
+    const comments = await TaskComment.find({
+      task: task._id,
+    })
+      .populate("author", "name email")
+      .sort({ createdAt: 1 });
+
+    return res.status(200).json({
+      message: "Task comments fetched successfully",
+      comments,
+    });
+  } catch (error) {
+    console.error("GET TASK COMMENTS ERROR:", error);
+
+    return res.status(500).json({
+      message: "Failed to fetch task comments",
+      error: error instanceof Error ? error.message : error,
+    });
+  }
+};
+
+// ADD A COMMENT TO A TASK
+export const addTaskComment = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).userId;
+    const { id } = req.params;
+    const { text } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({
+        message: "User is not authenticated",
+      });
+    }
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({
+        message: "Invalid task ID",
+      });
+    }
+
+    if (typeof text !== "string" || !text.trim()) {
+      return res.status(400).json({
+        message: "Comment cannot be empty",
+      });
+    }
+
+    const task = await Task.findById(id);
+
+    if (!task) {
+      return res.status(404).json({
+        message: "Task not found",
+      });
+    }
+
+    const project = await Project.findById(task.project);
+
+    if (!project) {
+      return res.status(404).json({
+        message: "Project not found",
+      });
+    }
+
+    const isMember = project.members.some(
+      (memberId) => memberId.toString() === userId.toString()
+    );
+
+    if (!isMember) {
+      return res.status(403).json({
+        message: "You are not a member of this project",
+      });
+    }
+
+    // Save the comment first.
+    const comment = await TaskComment.create({
+      task: task._id,
+      text: text.trim(),
+      author: userId,
+    });
+
+    // Notify the assignee, unless the assignee wrote the comment.
+    const assigneeId = task.assignee?.toString();
+
+    if (assigneeId && assigneeId !== userId.toString()) {
+      try {
+        await Notification.create({
+          recipient: assigneeId,
+          type: "task_commented",
+          message: `A new comment was added to task "${task.title}" (${task.taskKey}).`,
+          task: task._id,
+        });
+      } catch (notificationError) {
+        // A notification failure should not undo the saved comment.
+        console.error(
+          "TASK COMMENT NOTIFICATION ERROR:",
+          notificationError
+        );
+      }
+    }
+
+    const populatedComment = await TaskComment.findById(comment._id)
+      .populate("author", "name email");
+
+    return res.status(201).json({
+      message: "Comment added successfully",
+      comment: populatedComment,
+    });
+  } catch (error) {
+    console.error("ADD TASK COMMENT ERROR:", error);
+
+    if (error instanceof Error && error.name === "ValidationError") {
+      return res.status(400).json({
+        message: "Comment validation failed",
+        error: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      message: "Failed to add comment",
       error: error instanceof Error ? error.message : error,
     });
   }

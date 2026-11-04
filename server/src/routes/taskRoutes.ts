@@ -7,6 +7,8 @@ import {
   getTaskById,
   updateTask,
   deleteTask,
+  getTaskComments,
+  addTaskComment,
 } from "../controllers/taskController.js";
 
 import protect from "../middleware/authMiddleware.js";
@@ -31,6 +33,22 @@ router.get(
   "/",
   protect,
   getTasks
+);
+
+// Get comments for a task
+router.get(
+  "/:id/comments",
+  protect,
+  checkTaskProjectMember,
+  getTaskComments
+);
+
+// Add a comment to a task
+router.post(
+  "/:id/comments",
+  protect,
+  checkTaskProjectMember,
+  addTaskComment
 );
 
 // Get a single task with its details and subtasks

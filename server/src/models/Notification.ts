@@ -3,7 +3,7 @@ import mongoose, { Schema, Document } from "mongoose";
 
 export interface INotification extends Document {
   recipient: mongoose.Types.ObjectId;
-  type: "task_assigned" | "task_updated";
+  type: "task_assigned" | "task_updated" | "task_commented";
   message: string;
   task?: mongoose.Types.ObjectId;
   isRead: boolean;
@@ -22,7 +22,7 @@ const notificationSchema = new Schema<INotification>(
 
     type: {
       type: String,
-      enum: ["task_assigned", "task_updated"],
+      enum: ["task_assigned", "task_updated", "task_commented"],
       required: true,
     },
 

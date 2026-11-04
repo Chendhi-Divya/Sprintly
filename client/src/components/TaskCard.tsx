@@ -34,6 +34,7 @@ const priorityColors: Record<TaskPriority, string> = {
   Low: "bg-gray-100 text-gray-700",
   Medium: "bg-blue-100 text-blue-700",
   High: "bg-orange-100 text-orange-700",
+  
 };
 
 const typeIcons = {
@@ -41,6 +42,7 @@ const typeIcons = {
   Story: BookOpen,
   Task: CheckSquare,
   Bug: Bug,
+  "Sub-task": CheckSquare,
 };
 
 export default function TaskCard({

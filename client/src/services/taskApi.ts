@@ -12,9 +12,18 @@ export type TaskStatus =
   | "In Review"
   | "Done";
 
-export type TaskType = "Epic" | "Story" | "Task" | "Bug";
+export type TaskType =
+  | "Epic"
+  | "Story"
+  | "Task"
+  | "Bug"
+  
 
-export type TaskPriority = "Low" | "Medium" | "High";
+export type TaskPriority =
+  | "Low"
+  | "Medium"
+  | "High"
+
 
 export interface TaskUser {
   _id: string;
@@ -119,6 +128,7 @@ export interface UpdateTaskRequest {
   title?: string;
   description?: string;
 
+  type?: TaskType;
   status?: TaskStatus;
   priority?: TaskPriority;
 
@@ -164,9 +174,7 @@ export interface TaskComment {
   task: string;
   text: string;
 
-  author:
-    | TaskUser
-    | string;
+  author: TaskUser | string;
 
   createdAt: string;
   updatedAt?: string;
@@ -466,30 +474,22 @@ export const taskApi = createApi({
     baseUrl: import.meta.env.VITE_API_URL,
     credentials: "include",
 
-  prepareHeaders: (headers, { getState, endpoint }) => {
-  const reduxToken = (getState() as RootState).auth.token;
+    prepareHeaders: (headers, { getState }) => {
+      const reduxToken = (getState() as RootState).auth.token;
 
-  const storedToken =
-    typeof window !== "undefined"
-      ? localStorage.getItem("token")
-      : null;
+      const storedToken =
+        typeof window !== "undefined"
+          ? localStorage.getItem("token")
+          : null;
 
-  const token = reduxToken || storedToken;
+      const token = reduxToken || storedToken;
 
-  console.log("API endpoint:", endpoint);
-  console.log("Token available:", Boolean(token));
+      if (token) {
+        headers.set("Authorization", `Bearer ${token}`);
+      }
 
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
-
-  console.log(
-    "Authorization header added:",
-    headers.has("Authorization")
-  );
-
-  return headers;
-},
+      return headers;
+    },
   }),
 
   tagTypes: [
@@ -504,18 +504,24 @@ export const taskApi = createApi({
   ],
 
   endpoints: (builder) => ({
-
     // ======================================
     // TASK ENDPOINTS
     // ======================================
 
-    // Get all tasks
     getTasks: builder.query<TasksResponse, void>({
       query: () => "/tasks",
-      providesTags: ["Tasks"],
+      providesTags: (result) =>
+        result
+          ? [
+              ...result.tasks.map((task) => ({
+                type: "Tasks" as const,
+                id: task._id,
+              })),
+              { type: "Tasks" as const, id: "LIST" },
+            ]
+          : [{ type: "Tasks" as const, id: "LIST" }],
     }),
 
-    // Get individual task
     getTaskById: builder.query<TaskResponse, string>({
       query: (id) => `/tasks/${id}`,
       providesTags: (_result, _error, id) => [
@@ -523,7 +529,6 @@ export const taskApi = createApi({
       ],
     }),
 
-    // Create task
     createTask: builder.mutation<
       CreateTaskResponse,
       CreateTaskRequest
@@ -534,10 +539,12 @@ export const taskApi = createApi({
         body: newTask,
       }),
 
-      invalidatesTags: ["Tasks", "Notifications"],
+      invalidatesTags: [
+        { type: "Tasks", id: "LIST" },
+        "Notifications",
+      ],
     }),
 
-    // Update task details and status
     updateTask: builder.mutation<
       UpdateTaskResponse,
       UpdateTaskRequest
@@ -549,8 +556,9 @@ export const taskApi = createApi({
       }),
 
       invalidatesTags: (_result, _error, arg) => [
-        "Tasks",
         { type: "Tasks", id: arg.id },
+        { type: "Tasks", id: "LIST" },
+        "Notifications",
       ],
     }),
 
@@ -558,11 +566,7 @@ export const taskApi = createApi({
     // SUBTASK ENDPOINTS
     // ======================================
 
-    // Get subtasks of a task
-    getSubtasks: builder.query<
-      SubtasksResponse,
-      string
-    >({
+    getSubtasks: builder.query<SubtasksResponse, string>({
       query: (taskId) => `/tasks/${taskId}/subtasks`,
 
       providesTags: (_result, _error, taskId) => [
@@ -570,7 +574,6 @@ export const taskApi = createApi({
       ],
     }),
 
-    // Create subtask
     createSubtask: builder.mutation<
       CreateSubtaskResponse,
       CreateSubtaskRequest
@@ -582,7 +585,7 @@ export const taskApi = createApi({
       }),
 
       invalidatesTags: (_result, _error, arg) => [
-        "Tasks",
+        { type: "Tasks", id: "LIST" },
         { type: "TaskSubtasks", id: arg.taskId },
       ],
     }),
@@ -591,7 +594,6 @@ export const taskApi = createApi({
     // COMMENT ENDPOINTS
     // ======================================
 
-    // Get task comments
     getTaskComments: builder.query<
       TaskCommentsResponse,
       string
@@ -603,7 +605,6 @@ export const taskApi = createApi({
       ],
     }),
 
-    // Add comment
     addTaskComment: builder.mutation<
       AddTaskCommentResponse,
       AddTaskCommentRequest
@@ -623,14 +624,12 @@ export const taskApi = createApi({
     // ATTACHMENT ENDPOINTS
     // ======================================
 
-    // Upload attachment
     uploadTaskAttachment: builder.mutation<
       UploadTaskAttachmentResponse,
       UploadTaskAttachmentRequest
     >({
       query: ({ taskId, file }) => {
         const formData = new FormData();
-
         formData.append("attachment", file);
 
         return {
@@ -641,12 +640,12 @@ export const taskApi = createApi({
       },
 
       invalidatesTags: (_result, _error, arg) => [
-        "Tasks",
+        { type: "Tasks", id: arg.taskId },
+        { type: "Tasks", id: "LIST" },
         { type: "TaskAttachments", id: arg.taskId },
       ],
     }),
 
-    // Delete attachment
     deleteTaskAttachment: builder.mutation<
       { message: string },
       DeleteTaskAttachmentRequest
@@ -657,7 +656,8 @@ export const taskApi = createApi({
       }),
 
       invalidatesTags: (_result, _error, arg) => [
-        "Tasks",
+        { type: "Tasks", id: arg.taskId },
+        { type: "Tasks", id: "LIST" },
         { type: "TaskAttachments", id: arg.taskId },
       ],
     }),
@@ -728,8 +728,7 @@ export const taskApi = createApi({
       ProjectMembersResponse,
       string
     >({
-      query: (projectId) =>
-        `/projects/${projectId}/members`,
+      query: (projectId) => `/projects/${projectId}/members`,
 
       providesTags: ["ProjectMembers"],
     }),
@@ -973,7 +972,6 @@ export const taskApi = createApi({
         url:
           "/notifications/read-all?organizationId=" +
           encodeURIComponent(organizationId),
-
         method: "PATCH",
       }),
 
@@ -1040,5 +1038,4 @@ export const {
   useGetNotificationsQuery,
   useMarkNotificationAsReadMutation,
   useMarkAllNotificationsAsReadMutation,
-
 } = taskApi;

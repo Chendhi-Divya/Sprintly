@@ -5,9 +5,9 @@ interface ITask extends Document {
   taskKey?: string;
   title: string;
   description?: string;
-  type: "Epic" | "Story" | "Task" | "Bug" | "Sub-task";
+  type: "Epic" | "Story" | "Task" | "Bug" ;
   status: "To Do" | "In Progress" | "In Review" | "Done";
-  priority: "Low" | "Medium" | "High" | "Urgent";
+  priority: "Low" | "Medium" | "High" ;
   assignee?: mongoose.Types.ObjectId;
   reporter: mongoose.Types.ObjectId;
   project: mongoose.Types.ObjectId;
@@ -28,7 +28,7 @@ const taskSchema = new Schema<ITask>(
     description: { type: String, trim: true },
     type: {
       type: String,
-      enum: ["Epic", "Story", "Task", "Bug", "Sub-task"],
+      enum: ["Epic", "Story", "Task", "Bug"],
       required: true,
     },
     status: {
@@ -38,7 +38,7 @@ const taskSchema = new Schema<ITask>(
     },
     priority: {
       type: String,
-      enum: ["Low", "Medium", "High", "Urgent"],
+      enum: ["Low", "Medium", "High"],
       default: "Medium",
     },
     assignee: { type: Schema.Types.ObjectId, ref: "User" },

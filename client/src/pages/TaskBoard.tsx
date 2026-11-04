@@ -1,4 +1,6 @@
+
 import { useMemo, useState } from "react";
+import { ChevronDown, LoaderCircle } from "lucide-react";
 
 import {
   useGetTasksQuery,
@@ -8,6 +10,7 @@ import {
 
 import type { TaskFilters } from "./Dashboard";
 import TaskCard from "../components/TaskCard";
+import TaskDetailsPanel from "../components/TaskDetailsPanel";
 
 type ViewType = "List" | "Board";
 
@@ -31,12 +34,17 @@ export default function TaskBoard({
   searchText,
   filters,
 }: TaskBoardProps) {
-  const { data, isLoading } = useGetTasksQuery();
+  const { data, isLoading, isError } = useGetTasksQuery();
 
-  const [updateTask, { isLoading: isUpdatingTask }] =
-    useUpdateTaskMutation();
+  const [updateTask] = useUpdateTaskMutation();
 
   const [message, setMessage] = useState("");
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+
+  const [updatingTaskIds, setUpdatingTaskIds] = useState<Set<string>>(
+    () => new Set()
+  );
+
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dragOverStatus, setDragOverStatus] = useState<TaskStatus | null>(null);
 
@@ -52,7 +60,7 @@ export default function TaskBoard({
     });
   }, [data?.tasks, selectedProjectId]);
 
-  // Apply the shared search and filters.
+  // Apply search and filters.
   const filteredTasks = useMemo(() => {
     return tasks.filter((task) => {
       const search = searchText.trim().toLowerCase();
@@ -91,26 +99,65 @@ export default function TaskBoard({
     });
   }, [tasks, searchText, filters]);
 
-  // Update task status through the existing API.
+  // Update task status.
   async function handleStatusChange(
     taskId: string,
     status: TaskStatus
   ) {
     setMessage("");
 
+    setUpdatingTaskIds((current) => {
+      const next = new Set(current);
+      next.add(taskId);
+      return next;
+    });
+
     try {
-      await updateTask({ id: taskId, status }).unwrap();
+      await updateTask({
+        id: taskId,
+        status,
+      }).unwrap();
     } catch {
       setMessage("Failed to update task status.");
+    } finally {
+      setUpdatingTaskIds((current) => {
+        const next = new Set(current);
+        next.delete(taskId);
+        return next;
+      });
     }
   }
 
+  // Open task details.
+  function openTaskDetails(taskId: string) {
+    setSelectedTaskId(taskId);
+  }
+
+  // Close task details.
+  function closeTaskDetails() {
+    setSelectedTaskId(null);
+  }
+
   if (isLoading) {
-    return <p className="p-6">Loading tasks...</p>;
+    return (
+      <div className="flex items-center justify-center gap-2 p-10 text-gray-500">
+        <LoaderCircle size={18} className="animate-spin" />
+        Loading tasks...
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="p-6 text-sm text-red-600">
+        Failed to load tasks. Please refresh and try again.
+      </div>
+    );
   }
 
   return (
     <div className="min-h-screen bg-white p-6 text-gray-900">
+      {/* Header */}
       <div className="mb-6">
         <h2 className="text-2xl font-bold">
           {activeView === "List" ? "Task List" : "Task Board"}
@@ -121,12 +168,14 @@ export default function TaskBoard({
         </p>
       </div>
 
+      {/* Error message */}
       {message && (
         <p className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
           {message}
         </p>
       )}
 
+      {/* Task count */}
       <p className="mb-4 text-sm text-gray-500">
         Showing {filteredTasks.length} of {tasks.length} tasks
       </p>
@@ -152,13 +201,13 @@ export default function TaskBoard({
               {filteredTasks.map((task) => {
                 const assignee =
                   typeof task.assignee === "object" &&
-                  task.assignee
+                  task.assignee !== null
                     ? task.assignee.name
                     : "Unassigned";
 
                 const reporter =
                   typeof task.reporter === "object" &&
-                  task.reporter
+                  task.reporter !== null
                     ? task.reporter.name
                     : "—";
 
@@ -172,32 +221,52 @@ export default function TaskBoard({
                     </td>
 
                     <td className="max-w-xs px-4 py-4">
-                      <p className="font-medium text-gray-900">
+                      <button
+                        type="button"
+                        onClick={() => openTaskDetails(task._id)}
+                        className="text-left font-medium text-gray-900 hover:text-blue-600 hover:underline"
+                      >
                         {task.title}
-                      </p>
+                      </button>
                     </td>
 
-                    <td className="px-4 py-4">{task.type}</td>
+                    <td className="px-4 py-4">
+                      {task.type}
+                    </td>
 
                     <td className="px-4 py-4">
-                      <select
-                        value={task.status}
-                        disabled={isUpdatingTask}
-                        onChange={(event) =>
-                          handleStatusChange(
-                            task._id,
-                            event.target.value as TaskStatus
-                          )
-                        }
-                        className="rounded-md border bg-white px-2 py-1.5 text-xs disabled:opacity-50"
-                        aria-label={`Status for ${task.title}`}
-                      >
-                        {columns.map((status) => (
-                          <option key={status} value={status}>
-                            {status}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="relative w-fit">
+                        <select
+                          value={task.status}
+                          disabled={updatingTaskIds.has(task._id)}
+                          onChange={(event) =>
+                            handleStatusChange(
+                              task._id,
+                              event.target.value as TaskStatus
+                            )
+                          }
+                          className="min-w-[140px] appearance-none rounded-md border bg-white py-1.5 pl-3 pr-10 text-xs disabled:opacity-50"
+                          aria-label={`Status for ${task.title}`}
+                        >
+                          {columns.map((status) => (
+                            <option key={status} value={status}>
+                              {status}
+                            </option>
+                          ))}
+                        </select>
+
+                        {updatingTaskIds.has(task._id) ? (
+                          <LoaderCircle
+                            size={13}
+                            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-gray-500"
+                          />
+                        ) : (
+                          <ChevronDown
+                            size={13}
+                            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
+                          />
+                        )}
+                      </div>
                     </td>
 
                     <td className="px-4 py-4">
@@ -214,14 +283,17 @@ export default function TaskBoard({
                       </span>
                     </td>
 
-                    <td className="px-4 py-4">{assignee}</td>
-                    <td className="px-4 py-4">{reporter}</td>
+                    <td className="px-4 py-4">
+                      {assignee}
+                    </td>
+
+                    <td className="px-4 py-4">
+                      {reporter}
+                    </td>
 
                     <td className="whitespace-nowrap px-4 py-4 text-gray-600">
                       {task.dueDate
-                        ? new Date(
-                            task.dueDate
-                          ).toLocaleDateString()
+                        ? new Date(task.dueDate).toLocaleDateString()
                         : "—"}
                     </td>
                   </tr>
@@ -242,7 +314,7 @@ export default function TaskBoard({
           </table>
         </div>
       ) : (
-        /* Board view: preserve the four-column layout */
+        /* Board view */
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
           {columns.map((status) => {
             const columnTasks = filteredTasks.filter(
@@ -258,14 +330,25 @@ export default function TaskBoard({
                   setDragOverStatus(status);
                 }}
                 onDragLeave={(event) => {
-                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                  if (
+                    !event.currentTarget.contains(
+                      event.relatedTarget as Node | null
+                    )
+                  ) {
                     setDragOverStatus(null);
                   }
                 }}
                 onDrop={(event) => {
                   event.preventDefault();
-                  const taskId = event.dataTransfer.getData("text/plain") || draggedTaskId;
-                  const task = tasks.find((item) => item._id === taskId);
+
+                  const taskId =
+                    event.dataTransfer.getData("text/plain") ||
+                    draggedTaskId;
+
+                  const task = tasks.find(
+                    (item) => item._id === taskId
+                  );
+
                   setDragOverStatus(null);
                   setDraggedTaskId(null);
 
@@ -291,7 +374,7 @@ export default function TaskBoard({
                   {columnTasks.map((task) => (
                     <div
                       key={task._id}
-                      draggable={!isUpdatingTask}
+                      draggable={!updatingTaskIds.has(task._id)}
                       onDragStart={(event) => {
                         event.dataTransfer.effectAllowed = "move";
                         event.dataTransfer.setData("text/plain", task._id);
@@ -315,8 +398,9 @@ export default function TaskBoard({
                               ? task.assignee
                               : undefined,
                         }}
-                        isUpdating={isUpdatingTask}
+                        isUpdating={updatingTaskIds.has(task._id)}
                         onStatusChange={handleStatusChange}
+                        onClick={() => openTaskDetails(task._id)}
                       />
                     </div>
                   ))}
@@ -331,6 +415,14 @@ export default function TaskBoard({
             );
           })}
         </div>
+      )}
+
+      {/* Task details panel */}
+      {selectedTaskId && (
+        <TaskDetailsPanel
+          taskId={selectedTaskId}
+          onClose={closeTaskDetails}
+        />
       )}
     </div>
   );
