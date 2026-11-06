@@ -19,10 +19,7 @@ interface IOrganization extends Document {
   logoUrl?: string;
   slug?: string;
 
-  // Current organization owner.
   admin: mongoose.Types.ObjectId;
-
-  // Original organization creator.
   createdBy?: mongoose.Types.ObjectId;
 
   members: mongoose.Types.ObjectId[];
@@ -86,22 +83,18 @@ const organizationSchema = new Schema<IOrganization>(
       sparse: true,
     },
 
-    // Current organization owner.
     admin: {
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
     },
 
-    // User who originally created the organization.
-    // Optional to support existing organization records.
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: "User",
       default: undefined,
     },
 
-    // All organization members.
     members: [
       {
         type: Schema.Types.ObjectId,
@@ -109,7 +102,6 @@ const organizationSchema = new Schema<IOrganization>(
       },
     ],
 
-    // Role assigned to each organization member.
     memberships: {
       type: [membershipSchema],
       default: [],

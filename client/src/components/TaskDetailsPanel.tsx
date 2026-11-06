@@ -1,4 +1,8 @@
-import { useEffect, useState } from "react";
+
+import { useEffect, useRef, useState } from "react";
+import { useSelector } from "react-redux";
+import type { RootState } from "../store/store";
+
 import {
   X,
   Pencil,
@@ -7,43 +11,62 @@ import {
   Flag,
   Paperclip,
   MessageSquare,
-  History,
   Upload,
-  Plus,
   Send,
+  Check,
+  Plus,
+  ChevronDown,
 } from "lucide-react";
 
 import {
   useGetTaskByIdQuery,
+  useGetTasksQuery,
+  useGetOrganizationByIdQuery,
   useUpdateTaskMutation,
   useUploadTaskAttachmentMutation,
-  useCreateTaskMutation,
   useGetTaskCommentsQuery,
   useAddTaskCommentMutation,
   type TaskPriority,
 } from "../services/taskApi";
 
+type TaskItem = NonNullable<
+  ReturnType<typeof useGetTasksQuery>["data"]
+>["tasks"][number];
+
 type TaskDetailsPanelProps = {
   taskId: string;
+  initialTask?: TaskItem;
   onClose: () => void;
+};
+
+type ToastType = "success" | "error";
+
+type OrganizationMember = {
+  _id: string;
+  name?: string;
+  email?: string;
 };
 
 const priorities: TaskPriority[] = ["Low", "Medium", "High"];
 
 export default function TaskDetailsPanel({
   taskId,
+  initialTask,
   onClose,
 }: TaskDetailsPanelProps) {
-  const { data, isLoading, isError } = useGetTaskByIdQuery(taskId);
+  const { data, isLoading, isError } =
+    useGetTaskByIdQuery(taskId);
+
+  const {
+    data: allTasksData,
+    isLoading: isLoadingTasks,
+  } = useGetTasksQuery();
 
   const [updateTask, { isLoading: isSaving }] =
     useUpdateTaskMutation();
 
   const [uploadTaskAttachment, { isLoading: isUploading }] =
     useUploadTaskAttachmentMutation();
-
-  const [createTask, { isLoading: isCreatingEpic }] =
-    useCreateTaskMutation();
 
   const {
     data: commentsData,
@@ -54,34 +77,125 @@ export default function TaskDetailsPanel({
   const [addTaskComment, { isLoading: isAddingComment }] =
     useAddTaskCommentMutation();
 
-  const task = data?.task;
+  const selectedOrganization = useSelector(
+    (state: RootState) => state.auth.selectedOrganization
+  );
+
+  const organizationCode =
+    selectedOrganization?.org_id ?? "";
+
+  const {
+    data: organizationData,
+    isLoading: isLoadingMembers,
+    isError: isMembersError,
+    refetch: refetchMembers,
+  } = useGetOrganizationByIdQuery(organizationCode, {
+    skip: !organizationCode,
+  });
+
+  const task = data?.task ?? initialTask;
   const comments = commentsData?.comments ?? [];
 
+  // Organization members
+  const organization = organizationData?.organization;
+
+  const rawMembers = [
+    ...(organization?.members ?? []),
+    ...(organization?.memberships ?? []).map(
+      (membership) => membership.user
+    ),
+    ...(organization?.admin ? [organization.admin] : []),
+  ];
+
+  const members: OrganizationMember[] = Array.from(
+    new Map(
+      rawMembers
+        .filter(
+          (member): member is OrganizationMember =>
+            typeof member === "object" &&
+            member !== null &&
+            "_id" in member &&
+            typeof member._id === "string"
+        )
+        .map((member) => [member._id, member])
+    ).values()
+  );
+
+  // Local state
+  const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isEditingDescription, setIsEditingDescription] =
     useState(false);
 
-  const [activeTab, setActiveTab] = useState<"Comments" | "History">(
-    "Comments"
+  const [selectedFile, setSelectedFile] = useState<File | null>(
+    null
   );
-
-  const [message, setMessage] = useState("");
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const [commentText, setCommentText] = useState("");
 
   const [showEpicInput, setShowEpicInput] = useState(false);
-  const [epicTitle, setEpicTitle] = useState("");
 
+  const epicDropdownRef = useRef<HTMLDivElement>(null);
+
+  const [toast, setToast] = useState<{
+    text: string;
+    type: ToastType;
+  } | null>(null);
+
+  // Toast message
+  function showToast(
+    text: string,
+    type: ToastType = "success"
+  ) {
+    setToast({ text, type });
+
+    window.setTimeout(() => {
+      setToast(null);
+    }, 3000);
+  }
+
+  // Close dropdown only when clicking outside
+  useEffect(() => {
+    if (!showEpicInput) return;
+
+    function handleOutsideClick(event: MouseEvent) {
+      if (
+        epicDropdownRef.current &&
+        !epicDropdownRef.current.contains(event.target as Node)
+      ) {
+        setShowEpicInput(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleOutsideClick);
+
+    return () => {
+      document.removeEventListener(
+        "mousedown",
+        handleOutsideClick
+      );
+    };
+  }, [showEpicInput]);
+
+  // Update local inputs when task changes
   useEffect(() => {
     if (task) {
+      setTitle(task.title ?? "");
       setDescription(task.description ?? "");
     }
-  }, [task]);
+  }, [task?._id, task?.title, task?.description]);
 
+  // Close panel using Escape key
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
+        if (showEpicInput) {
+          setShowEpicInput(false);
+          return;
+        }
+
         onClose();
       }
     }
@@ -91,11 +205,113 @@ export default function TaskDetailsPanel({
     return () => {
       window.removeEventListener("keydown", handleEscape);
     };
-  }, [onClose]);
+  }, [onClose, showEpicInput]);
 
+  // Loading state
+  if (isLoading && !task) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div className="flex h-[300px] w-full max-w-6xl items-center justify-center rounded-2xl bg-white">
+          <p className="text-sm text-gray-500">
+            Loading task details...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Task error state
+  if (!task) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div className="flex h-[300px] w-full max-w-6xl flex-col items-center justify-center rounded-2xl bg-white p-6">
+          <p className="text-sm text-red-600">
+            {isError
+              ? "Unable to load task details. Please try again."
+              : "Task not found."}
+          </p>
+
+          <button
+            onClick={onClose}
+            className="mt-4 rounded-lg border border-gray-200 px-5 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Current project ID
+  const projectId =
+    typeof task.project === "object" && task.project
+      ? task.project._id
+      : task.project;
+
+  // Get all available parent tasks from the same project
+  const availableEpics = (allTasksData?.tasks ?? []).filter(
+    (item) => {
+      const itemProjectId =
+        typeof item.project === "object" && item.project
+          ? item.project._id
+          : item.project;
+
+      return (
+        itemProjectId === projectId &&
+        item._id !== task._id
+      );
+    }
+  );
+
+  // Current parent task
+  const currentParent =
+    typeof task.parentTask === "object" && task.parentTask
+      ? task.parentTask
+      : availableEpics.find(
+          (parentTask) => parentTask._id === task.parentTask
+        ) ?? null;
+
+  // Current assignee ID
+  const currentAssigneeId =
+    typeof task.assignee === "object" && task.assignee
+      ? task.assignee._id
+      : typeof task.assignee === "string"
+        ? task.assignee
+        : "";
+
+  const modalClass =
+    "relative flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl";
+
+  const inputClass =
+    "box-border w-full min-w-0 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50 disabled:cursor-not-allowed disabled:bg-gray-100";
+
+  const labelClass =
+    "mb-2 flex items-center gap-2 text-sm font-medium text-gray-600";
+
+  // Save task title
+  async function saveTitle() {
+    const updatedTitle = title.trim();
+
+    if (!updatedTitle) {
+      showToast("Task name cannot be empty.", "error");
+      return;
+    }
+
+    try {
+      await updateTask({
+        id: taskId,
+        title: updatedTitle,
+      }).unwrap();
+
+      setIsEditingTitle(false);
+      showToast("Task name updated successfully.");
+    } catch {
+      showToast("Failed to update task name.", "error");
+    }
+  }
+
+  // Save task description
   async function saveDescription() {
-    if (!task) return;
-
     try {
       await updateTask({
         id: taskId,
@@ -103,12 +319,13 @@ export default function TaskDetailsPanel({
       }).unwrap();
 
       setIsEditingDescription(false);
-      setMessage("Description updated successfully.");
+      showToast("Description updated successfully.");
     } catch {
-      setMessage("Failed to update description.");
+      showToast("Failed to update description.", "error");
     }
   }
 
+  // Update priority and due date
   async function updateField(values: {
     priority?: TaskPriority;
     dueDate?: string | null;
@@ -119,54 +336,54 @@ export default function TaskDetailsPanel({
         ...values,
       }).unwrap();
 
-      setMessage("Task updated successfully.");
+      showToast("Task details updated successfully.");
     } catch {
-      setMessage("Failed to update task.");
+      showToast("Failed to update task details.", "error");
     }
   }
 
-  async function handleCreateEpic() {
-    if (!task) return;
-
-    const title = epicTitle.trim();
-
-    if (!title) {
-      setMessage("Please enter an Epic name.");
-      return;
-    }
-
-    const projectId =
-      typeof task.project === "object" && task.project
-        ? task.project._id
-        : task.project;
-
-    if (!projectId) {
-      setMessage("This task does not have a project assigned.");
-      return;
-    }
-
+  // Update assignee
+  async function handleAssigneeChange(assigneeId: string) {
     try {
-      await createTask({
-        title,
-        description: "",
-        type: "Epic",
-        priority: "Medium",
-        project: projectId,
+      await updateTask({
+        id: taskId,
+        assignee: assigneeId || null,
       }).unwrap();
 
-      setEpicTitle("");
-      setShowEpicInput(false);
-      setMessage("Epic created successfully.");
+      showToast(
+        assigneeId
+          ? "Assignee updated successfully."
+          : "Assignee removed successfully."
+      );
     } catch {
-      setMessage("Failed to create Epic. Please try again.");
+      showToast("Failed to update assignee.", "error");
     }
   }
 
+  // Assign parent task
+  async function handleSelectEpic(parentTaskId: string) {
+    if (!parentTaskId) return;
+
+    try {
+      await updateTask({
+        id: taskId,
+        parentTask: parentTaskId,
+      }).unwrap();
+
+      setShowEpicInput(false);
+
+      showToast("Parent task assigned successfully.");
+    } catch {
+      showToast("Failed to update parent task.", "error");
+    }
+  }
+
+  // Add comment
   async function handleAddComment() {
     const text = commentText.trim();
 
     if (!text) {
-      setMessage("Please write a comment first.");
+      showToast("Please write a comment first.", "error");
       return;
     }
 
@@ -177,15 +394,19 @@ export default function TaskDetailsPanel({
       }).unwrap();
 
       setCommentText("");
-      setMessage("Comment added successfully.");
+      showToast("Comment added successfully.");
     } catch {
-      setMessage("Failed to add comment. Please try again.");
+      showToast(
+        "Failed to add comment. Please try again.",
+        "error"
+      );
     }
   }
 
+  // Upload attachment
   async function handleFileUpload() {
     if (!selectedFile) {
-      setMessage("Please select a file first.");
+      showToast("Please select a file first.", "error");
       return;
     }
 
@@ -196,63 +417,19 @@ export default function TaskDetailsPanel({
       }).unwrap();
 
       setSelectedFile(null);
-      setMessage("Attachment uploaded successfully.");
+      showToast("File uploaded successfully.");
     } catch {
-      setMessage("Attachment upload failed. Please try again.");
+      showToast(
+        "File upload failed. Please try again.",
+        "error"
+      );
     }
   }
 
-  const modalClass =
-    "flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl";
-
-  const inputClass =
-    "w-full min-w-0 rounded-xl border border-gray-200 bg-white px-4 py-3 pr-10 text-sm text-gray-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50";
-
-  const labelClass =
-    "mb-2 flex items-center gap-2 text-sm font-medium text-gray-600";
-
-  if (isLoading) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-        <div className={`${modalClass} h-[300px] items-center justify-center`}>
-          <p className="text-sm text-gray-500">
-            Loading task details...
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (isError || !task) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-        <div
-          className={`${modalClass} h-[300px] items-center justify-center p-6`}
-        >
-          <p className="text-sm text-red-600">
-            Unable to load task details.
-          </p>
-
-          <button
-            onClick={onClose}
-            className="mt-4 rounded-lg border border-gray-200 px-5 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const assignee =
-    typeof task.assignee === "object" && task.assignee
-      ? task.assignee.name
-      : "Unassigned";
-
-  const parentTask =
-    typeof task.parentTask === "object" && task.parentTask
-      ? task.parentTask
-      : null;
+  // Format due date for date input
+  const formattedDueDate = task.dueDate
+    ? new Date(task.dueDate).toISOString().slice(0, 10)
+    : "";
 
   return (
     <div
@@ -263,8 +440,31 @@ export default function TaskDetailsPanel({
         className={modalClass}
         onClick={(event) => event.stopPropagation()}
       >
+        {/* Toast */}
+        {toast && (
+          <div
+            className={`absolute right-4 top-4 z-[70] flex max-w-[calc(100%-2rem)] items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium shadow-lg ${
+              toast.type === "success"
+                ? "bg-green-600 text-white"
+                : "bg-red-600 text-white"
+            }`}
+          >
+            <Check size={16} />
+
+            <span>{toast.text}</span>
+
+            <button
+              onClick={() => setToast(null)}
+              className="ml-2 rounded p-0.5 hover:bg-white/20"
+              aria-label="Close notification"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        )}
+
         {/* Header */}
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-gray-200 px-6 py-5 sm:px-8">
+        <div className="relative z-30 flex shrink-0 items-center justify-between gap-4 border-b border-gray-200 px-6 py-5 sm:px-8">
           <div className="min-w-0">
             <p className="text-xs font-medium uppercase tracking-wider text-gray-400">
               Task details
@@ -275,22 +475,85 @@ export default function TaskDetailsPanel({
             </p>
           </div>
 
-          <div className="ml-auto flex items-center gap-3">
-            <button
-              onClick={() => {
-                setShowEpicInput((previous) => !previous);
-                setEpicTitle("");
-                setMessage("");
-              }}
-              className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
+          <div className="ml-auto flex shrink-0 items-center gap-3">
+            {/* Add Epic button and dropdown */}
+            <div
+              ref={epicDropdownRef}
+              className="relative"
             >
-              <Plus size={16} />
-              Add Epic
-            </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setShowEpicInput((previous) => !previous)
+                }
+                className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                  showEpicInput
+                    ? "border-blue-200 bg-blue-50 text-blue-600"
+                    : "border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
+                }`}
+              >
+                <Plus size={16} />
+                Add Epic
+              </button>
+
+              {/* Dropdown directly below Add Epic */}
+              {showEpicInput && (
+                <div className="absolute right-0 top-full z-50 mt-2 w-[min(320px,calc(100vw-2rem))] rounded-xl border border-gray-200 bg-white p-4 shadow-xl">
+                  <label
+                    htmlFor="parent-epic"
+                    className="mb-2 block text-sm font-semibold text-gray-700"
+                  >
+                    Select your Epic
+                  </label>
+
+                  <div className="relative">
+                    <select
+                      id="parent-epic"
+                      value={currentParent?._id ?? ""}
+                      onChange={(event) =>
+                        void handleSelectEpic(event.target.value)
+                      }
+                      disabled={isLoadingTasks || isSaving}
+                      className="box-border w-full appearance-none rounded-lg border border-gray-300 bg-white px-4 py-3 pr-10 text-sm text-gray-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-100"
+                    >
+                      <option value="">
+                        {isLoadingTasks
+                          ? "Loading parent tasks..."
+                          : "Select your Epic"}
+                      </option>
+
+                     {availableEpics.map((parentTask) => (
+  <option key={parentTask._id} value={parentTask._id}>
+    {parentTask.title}
+  </option>
+))}
+                    </select>
+
+                    <ChevronDown
+                      size={16}
+                      className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+                    />
+                  </div>
+
+                  {!isLoadingTasks &&
+                    availableEpics.length === 0 && (
+                      <p className="mt-2 text-xs text-gray-500">
+                        No parent tasks available in this project.
+                      </p>
+                    )}
+
+                  {currentParent && (
+                    <p className="mt-2 text-xs text-gray-500">
+                      Current parent: {currentParent.title}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
 
             <button
               onClick={onClose}
-              className="shrink-0 rounded-lg p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-900"
+              className="rounded-lg p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-900"
               aria-label="Close task details"
             >
               <X size={20} />
@@ -298,66 +561,66 @@ export default function TaskDetailsPanel({
           </div>
         </div>
 
-        {/* Add Epic input */}
-        {showEpicInput && (
-          <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-gray-200 bg-gray-50 px-6 py-4 sm:px-8">
-            <input
-              type="text"
-              value={epicTitle}
-              onChange={(event) => setEpicTitle(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  handleCreateEpic();
-                }
-              }}
-              placeholder="Enter Epic name..."
-              className="min-w-[180px] flex-1 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
-            />
-
-            <button
-              onClick={handleCreateEpic}
-              disabled={isCreatingEpic}
-              className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isCreatingEpic ? "Creating..." : "Create Epic"}
-            </button>
-
-            <button
-              onClick={() => {
-                setShowEpicInput(false);
-                setEpicTitle("");
-              }}
-              className="rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-600 transition hover:bg-gray-100"
-            >
-              Cancel
-            </button>
-          </div>
-        )}
-
-        {/* Message */}
-        {message && (
-          <div className="flex shrink-0 items-center justify-between border-b border-blue-100 bg-blue-50 px-6 py-3 text-sm text-blue-700">
-            <span>{message}</span>
-
-            <button
-              onClick={() => setMessage("")}
-              className="ml-3 rounded-md p-1 hover:bg-blue-100"
-              aria-label="Dismiss message"
-            >
-              <X size={15} />
-            </button>
-          </div>
-        )}
-
         {/* Main content */}
         <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_320px]">
           {/* Left section */}
           <div className="min-w-0 space-y-8 p-6 sm:p-8">
-            {/* Task name */}
+            {/* Editable task name */}
             <section>
-              <h2 className="break-words text-2xl font-semibold leading-snug text-gray-900 sm:text-3xl">
-                {task.title}
-              </h2>
+              {isEditingTitle ? (
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    value={title}
+                    onChange={(event) => setTitle(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        void saveTitle();
+                      }
+                    }}
+                    autoFocus
+                    className="w-full rounded-xl border border-blue-300 px-4 py-3 text-xl font-semibold text-gray-900 outline-none focus:ring-4 focus:ring-blue-50 sm:text-2xl"
+                  />
+
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={() => {
+                        setTitle(task.title);
+                        setIsEditingTitle(false);
+                      }}
+                      disabled={isSaving}
+                      className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+
+                    <button
+                      onClick={() => void saveTitle()}
+                      disabled={isSaving}
+                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {isSaving ? "Saving..." : "Save"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-start justify-between gap-3">
+                  <h2 className="break-words text-2xl font-semibold leading-snug text-gray-900 sm:text-3xl">
+                    {task.title}
+                  </h2>
+
+                  <button
+                    onClick={() => {
+                      setTitle(task.title);
+                      setIsEditingTitle(true);
+                    }}
+                    className="shrink-0 rounded-lg p-2 text-gray-500 transition hover:bg-blue-50 hover:text-blue-600"
+                    aria-label="Edit task name"
+                  >
+                    <Pencil size={16} />
+                  </button>
+                </div>
+              )}
             </section>
 
             {/* Description */}
@@ -369,21 +632,20 @@ export default function TaskDetailsPanel({
 
                 {!isEditingDescription && (
                   <button
-                    onClick={() => setIsEditingDescription(true)}
-                    className="flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-gray-500 transition hover:bg-blue-50 hover:text-blue-600"
+                    onClick={() => {
+                      setDescription(task.description ?? "");
+                      setIsEditingDescription(true);
+                    }}
+                    className="shrink-0 rounded-lg p-2 text-gray-500 transition hover:bg-blue-50 hover:text-blue-600"
+                    aria-label="Edit description"
                   >
-                    <Pencil size={14} />
-                    Edit
+                    <Pencil size={16} />
                   </button>
                 )}
               </div>
 
               {isEditingDescription ? (
                 <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 sm:p-5">
-                  <label className="mb-2 block text-sm font-medium text-gray-700">
-                    Task description
-                  </label>
-
                   <textarea
                     value={description}
                     onChange={(event) =>
@@ -391,26 +653,25 @@ export default function TaskDetailsPanel({
                     }
                     rows={6}
                     placeholder="Describe the task, its requirements, and expected outcome..."
-                    className="w-full resize-y rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm leading-6 text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
+                    className="w-full resize-y rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm leading-6 text-gray-800 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
                   />
 
-                  <div className="mt-4 flex flex-wrap items-center justify-end gap-3">
+                  <div className="mt-4 flex justify-end gap-3">
                     <button
                       onClick={() => {
                         setDescription(task.description ?? "");
                         setIsEditingDescription(false);
-                        setMessage("");
                       }}
                       disabled={isSaving}
-                      className="rounded-lg border border-gray-300 bg-white px-5 py-2.5 text-sm font-medium text-gray-600 transition hover:bg-gray-100 disabled:opacity-50"
+                      className="rounded-lg border border-gray-300 bg-white px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100"
                     >
                       Cancel
                     </button>
 
                     <button
-                      onClick={saveDescription}
+                      onClick={() => void saveDescription()}
                       disabled={isSaving}
-                      className="rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
                     >
                       {isSaving ? "Saving..." : "Save changes"}
                     </button>
@@ -420,7 +681,7 @@ export default function TaskDetailsPanel({
                 <div className="rounded-xl border border-gray-100 bg-gray-50/70 p-4 sm:p-5">
                   <p className="whitespace-pre-wrap break-words text-sm leading-7 text-gray-600">
                     {task.description ||
-                      "No description added yet. Click Edit to add one."}
+                      "No description added yet. Click the edit icon to add one."}
                   </p>
                 </div>
               )}
@@ -436,17 +697,17 @@ export default function TaskDetailsPanel({
                 </h3>
               </div>
 
-              <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50/50 p-6 transition hover:border-blue-300 hover:bg-blue-50/20 sm:p-8">
+              <div className="w-full rounded-xl border border-dashed border-gray-300 bg-gray-50/50 p-3 sm:p-4">
                 <label className="flex cursor-pointer flex-col items-center justify-center text-center">
-                  <div className="mb-3 rounded-full bg-blue-50 p-3">
-                    <Upload size={22} className="text-blue-600" />
+                  <div className="mb-2 rounded-full bg-blue-50 p-2">
+                    <Upload size={19} className="text-blue-600" />
                   </div>
 
                   <span className="text-sm font-semibold text-gray-700">
                     Choose a file or screenshot
                   </span>
 
-                  <span className="mt-2 text-xs text-gray-400">
+                  <span className="mt-1 text-xs text-gray-400">
                     Select a file from your computer
                   </span>
 
@@ -454,27 +715,22 @@ export default function TaskDetailsPanel({
                     type="file"
                     className="hidden"
                     onChange={(event) => {
-                      setSelectedFile(event.target.files?.[0] ?? null);
-                      setMessage("");
+                      setSelectedFile(
+                        event.target.files?.[0] ?? null
+                      );
                     }}
                   />
                 </label>
 
                 {selectedFile && (
-                  <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white p-3">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="rounded-lg bg-gray-100 p-2">
-                        <Paperclip size={16} className="text-gray-500" />
-                      </div>
-
-                      <span className="truncate text-sm font-medium text-gray-700">
-                        {selectedFile.name}
-                      </span>
-                    </div>
+                  <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-2.5">
+                    <span className="truncate text-sm font-medium text-gray-700">
+                      {selectedFile.name}
+                    </span>
 
                     <button
                       onClick={() => setSelectedFile(null)}
-                      className="text-xs font-medium text-red-500 transition hover:text-red-700"
+                      className="shrink-0 text-xs font-medium text-red-500 hover:text-red-700"
                     >
                       Remove
                     </button>
@@ -483,132 +739,110 @@ export default function TaskDetailsPanel({
 
                 {selectedFile && (
                   <button
-                    onClick={handleFileUpload}
+                    onClick={() => void handleFileUpload()}
                     disabled={isUploading}
-                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                   >
                     <Upload size={16} />
-                    {isUploading ? "Uploading..." : "Upload attachment"}
+
+                    {isUploading
+                      ? "Uploading..."
+                      : "Upload attachment"}
                   </button>
                 )}
               </div>
             </section>
 
-            {/* Activity */}
+            {/* Activity - Comments only */}
             <section>
-              <h3 className="mb-4 text-base font-semibold text-gray-900">
-                Activity
-              </h3>
+              <div className="mb-4 flex items-center gap-2">
+                <MessageSquare size={18} className="text-gray-500" />
 
-              <div className="mb-5 flex gap-6 border-b border-gray-200">
-                <button
-                  onClick={() => setActiveTab("Comments")}
-                  className={`flex items-center gap-2 border-b-2 px-1 pb-3 text-sm transition ${
-                    activeTab === "Comments"
-                      ? "border-blue-600 font-semibold text-blue-600"
-                      : "border-transparent text-gray-500 hover:text-gray-700"
-                  }`}
-                >
-                  <MessageSquare size={15} />
-                  Comments
-                </button>
-
-                <button
-                  onClick={() => setActiveTab("History")}
-                  className={`flex items-center gap-2 border-b-2 px-1 pb-3 text-sm transition ${
-                    activeTab === "History"
-                      ? "border-blue-600 font-semibold text-blue-600"
-                      : "border-transparent text-gray-500 hover:text-gray-700"
-                  }`}
-                >
-                  <History size={15} />
-                  History
-                </button>
+                <h3 className="text-base font-semibold text-gray-900">
+                  Activity
+                </h3>
               </div>
 
-              {activeTab === "Comments" ? (
-                <div className="space-y-5">
-                  {/* Add comment */}
-                  <div className="rounded-xl border border-gray-200 bg-white p-3 sm:p-4">
-                    <textarea
-                      rows={3}
-                      value={commentText}
-                      onChange={(event) =>
-                        setCommentText(event.target.value)
+              <div className="w-full space-y-5">
+                <div className="w-full rounded-xl border border-gray-200 bg-white p-3">
+                  <textarea
+                    rows={2}
+                    value={commentText}
+                    onChange={(event) =>
+                      setCommentText(event.target.value)
+                    }
+                    placeholder="Write a comment..."
+                    className="h-16 max-h-28 w-full resize-y border-0 bg-transparent text-sm leading-6 text-gray-800 outline-none placeholder:text-gray-400 focus:ring-0"
+                  />
+
+                  <div className="mt-2 flex justify-end border-t border-gray-100 pt-2">
+                    <button
+                      onClick={() => void handleAddComment()}
+                      disabled={
+                        isAddingComment || !commentText.trim()
                       }
-                      placeholder="Write a comment..."
-                      className="w-full resize-y border-0 bg-transparent text-sm leading-6 text-gray-800 outline-none placeholder:text-gray-400 focus:ring-0"
-                    />
+                      className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      <Send size={15} />
 
-                    <div className="mt-3 flex justify-end border-t border-gray-100 pt-3">
-                      <button
-                        onClick={handleAddComment}
-                        disabled={isAddingComment || !commentText.trim()}
-                        className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Send size={15} />
-                        {isAddingComment ? "Adding..." : "Add comment"}
-                      </button>
-                    </div>
+                      {isAddingComment
+                        ? "Adding..."
+                        : "Add comment"}
+                    </button>
                   </div>
+                </div>
 
-                  {/* Existing comments */}
-                  {isLoadingComments ? (
-                    <p className="text-sm text-gray-400">
-                      Loading comments...
-                    </p>
-                  ) : isCommentsError ? (
-                    <p className="text-sm text-red-500">
-                      Unable to load comments.
-                    </p>
-                  ) : comments.length === 0 ? (
-                    <p className="rounded-xl bg-gray-50 p-4 text-sm text-gray-500">
-                      No comments yet. Start the conversation.
-                    </p>
-                  ) : (
-                    <div className="space-y-4">
-                      {comments.map((comment) => {
-                        const authorName =
-                          typeof comment.author === "object"
-                            ? comment.author.name
-                            : "User";
+                {isLoadingComments ? (
+                  <p className="text-sm text-gray-400">
+                    Loading comments...
+                  </p>
+                ) : isCommentsError ? (
+                  <p className="text-sm text-red-500">
+                    Unable to load comments.
+                  </p>
+                ) : comments.length === 0 ? (
+                  <p className="rounded-xl bg-gray-50 p-4 text-sm text-gray-500">
+                    No comments yet. Start the conversation.
+                  </p>
+                ) : (
+                  <div className="space-y-4">
+                    {comments.map((comment) => {
+                      const authorName =
+                        typeof comment.author === "object"
+                          ? comment.author.name
+                          : "User";
 
-                        return (
-                          <div
-                            key={comment._id}
-                            className="rounded-xl border border-gray-100 bg-gray-50/70 p-4"
-                          >
-                            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                              <p className="text-sm font-semibold text-gray-800">
-                                {authorName}
-                              </p>
+                      return (
+                        <div
+                          key={comment._id}
+                          className="rounded-xl border border-gray-100 bg-gray-50/70 p-4"
+                        >
+                          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-sm font-semibold text-gray-800">
+                              {authorName}
+                            </p>
 
-                              <p className="text-xs text-gray-400">
-                                {new Date(
-                                  comment.createdAt
-                                ).toLocaleString()}
-                              </p>
-                            </div>
-
-                            <p className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-600">
-                              {comment.text}
+                            <p className="text-xs text-gray-400">
+                              {new Date(
+                                comment.createdAt
+                              ).toLocaleString()}
                             </p>
                           </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <p className="rounded-xl bg-gray-50 p-4 text-sm text-gray-500">
-                  Task activity history will be implemented separately.
-                </p>
-              )}
+
+                          <p className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-600">
+                            {comment.text}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </section>
           </div>
 
           {/* Right section */}
-          <aside className="min-w-0 space-y-7 border-t border-gray-200 bg-gray-50/80 px-6 py-7 sm:px-8 lg:border-l lg:border-t-0">
+          <aside className="min-w-0 space-y-7 border-t border-gray-200 bg-gray-50/80 px-6 py-7 sm:border-l sm:border-t-0 sm:px-8">
             <h3 className="text-lg font-semibold text-gray-900">
               Details
             </h3>
@@ -621,11 +855,68 @@ export default function TaskDetailsPanel({
                   Assignee
                 </label>
 
-                <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
-                  <p className="break-words text-sm font-medium text-gray-700">
-                    {assignee}
-                  </p>
+                <div className="relative">
+                  <select
+                    value={currentAssigneeId}
+                    onChange={(event) =>
+                      void handleAssigneeChange(event.target.value)
+                    }
+                    disabled={
+                      !organizationCode ||
+                      isLoadingMembers ||
+                      isMembersError ||
+                      isSaving
+                    }
+                    className={`${inputClass} appearance-none pr-10`}
+                  >
+                    <option value="">
+                      {isLoadingMembers
+                        ? "Loading members..."
+                        : isMembersError
+                          ? "Could not load members"
+                          : members.length === 0
+                            ? "No members found"
+                            : "Unassigned"}
+                    </option>
+
+                    {members.map((member) => (
+                      <option key={member._id} value={member._id}>
+                        {member.name || member.email || "Organization member"}
+                        {member.email ? ` (${member.email})` : ""}
+                      </option>
+                    ))}
+                  </select>
+
+                  <ChevronDown
+                    size={16}
+                    className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-gray-400"
+                  />
                 </div>
+
+                {!organizationCode && (
+                  <p className="mt-2 text-xs text-gray-400">
+                    Select an organization to load its members.
+                  </p>
+                )}
+
+                {isMembersError && (
+                  <button
+                    type="button"
+                    onClick={() => void refetchMembers()}
+                    className="mt-2 text-xs font-medium text-blue-600 hover:underline"
+                  >
+                    Retry loading members
+                  </button>
+                )}
+
+                {organizationCode &&
+                  !isLoadingMembers &&
+                  !isMembersError &&
+                  members.length === 0 && (
+                    <p className="mt-2 text-xs text-gray-400">
+                      No organization members found.
+                    </p>
+                  )}
               </div>
 
               {/* Parent */}
@@ -635,8 +926,8 @@ export default function TaskDetailsPanel({
                 </label>
 
                 <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
-                  <p className="break-words text-sm text-gray-700">
-                    {parentTask?.title ?? "No parent task"}
+                  <p className="truncate text-sm text-gray-700">
+                    {currentParent?.title ?? "No parent task assigned"}
                   </p>
                 </div>
               </div>
@@ -665,11 +956,11 @@ export default function TaskDetailsPanel({
                   <select
                     value={task.priority}
                     onChange={(event) =>
-                      updateField({
+                      void updateField({
                         priority: event.target.value as TaskPriority,
                       })
                     }
-                    className={`${inputClass} appearance-none`}
+                    className={`${inputClass} appearance-none pr-10`}
                   >
                     {priorities.map((priority) => (
                       <option key={priority} value={priority}>
@@ -678,23 +969,10 @@ export default function TaskDetailsPanel({
                     ))}
                   </select>
 
-                  <span className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-gray-400">
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 14 14"
-                      fill="none"
-                      aria-hidden="true"
-                    >
-                      <path
-                        d="M3 5L7 9L11 5"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </span>
+                  <ChevronDown
+                    size={16}
+                    className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-gray-400"
+                  />
                 </div>
               </div>
 
@@ -707,17 +985,13 @@ export default function TaskDetailsPanel({
 
                 <input
                   type="date"
-                  value={
-                    task.dueDate
-                      ? new Date(task.dueDate).toISOString().slice(0, 10)
-                      : ""
-                  }
+                  value={formattedDueDate}
                   onChange={(event) =>
-                    updateField({
+                    void updateField({
                       dueDate: event.target.value || null,
                     })
                   }
-                  className={inputClass}
+                  className={`${inputClass} pr-4 [&::-webkit-calendar-picker-indicator]:ml-2 [&::-webkit-calendar-picker-indicator]:mr-1 [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
                 />
               </div>
             </div>

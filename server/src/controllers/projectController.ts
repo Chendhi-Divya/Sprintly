@@ -121,7 +121,6 @@ async function canManageProject(
 }
 
 // Change all task keys when a project's issue key changes.
-// Example: SD-01, SD-02 -> DEV-01, DEV-02
 async function updateProjectTaskKeys(
   projectId: mongoose.Types.ObjectId,
   projectKey: string
@@ -163,7 +162,6 @@ async function updateProjectTaskKeys(
 /* --------------------------------------------------
    CREATE PROJECT
 -------------------------------------------------- */
-
 export const createProject = async (
   req: Request,
   res: Response
@@ -256,7 +254,10 @@ export const createProject = async (
       description: description?.trim() ?? "",
       organization: selectedOrganization.org_id,
       owner: userId,
-      members: [userId],
+
+      // A new project starts with no members.
+      // Members must be explicitly added by the project owner.
+      members: [],
     });
 
     return res.status(201).json({
@@ -429,7 +430,6 @@ export const getProjectById = async (
       });
     }
 
-    // Fetch project without population for authorization.
     const project = await Project.findById(id);
 
     if (!project) {
@@ -453,7 +453,6 @@ export const getProjectById = async (
       });
     }
 
-    // Populate owner and members after authorization.
     const populatedProject = await project.populate([
       {
         path: "owner",
@@ -946,6 +945,7 @@ export const removeProjectMember = async (
     }
 
     if (
+      typeof memberId !== "string" ||
       !mongoose.isValidObjectId(id) ||
       !mongoose.isValidObjectId(memberId)
     ) {
@@ -990,15 +990,44 @@ export const removeProjectMember = async (
       });
     }
 
+    // Check whether this member has unfinished assigned tasks.
+    // Explicit filter typing avoids the Mongoose overload error.
+    const taskFilter: any = {
+      project: new mongoose.Types.ObjectId(Array.isArray(id) ? id[0] : id),
+      assignee: new mongoose.Types.ObjectId(Array.isArray(memberId) ? memberId[0] : memberId),
+      status: { $ne: "Done" },
+    };
+
+    const assignedTasks = await Task.find(taskFilter)
+      .select("taskKey title status");
+
+    if (assignedTasks.length > 0) {
+      return res.status(400).json({
+        message:
+          "This member has unfinished assigned tasks. Reassign those tasks before removing the member.",
+        assignedTasks: assignedTasks.map((task) => ({
+          _id: task._id,
+          taskKey: task.taskKey,
+          title: task.title,
+          status: task.status,
+        })),
+      });
+    }
+
+    // Remove the member from the project.
     project.members = project.members.filter(
       (member) => member.toString() !== memberId
     );
 
     await project.save();
 
+    const updatedProject = await Project.findById(project._id)
+      .populate("owner", "name email")
+      .populate("members", "name email");
+
     return res.status(200).json({
       message: "Project member removed successfully",
-      project,
+      project: updatedProject,
     });
   } catch (error) {
     console.error("REMOVE PROJECT MEMBER ERROR:", error);

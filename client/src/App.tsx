@@ -7,6 +7,8 @@ import Login from "./pages/login";
 import VerifyEmail from "./pages/VerifyEmail";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
+import AcceptInvitation from "./pages/AcceptInvitation";
+
 import Organizations from "./pages/Organizations";
 import CreateOrganization from "./pages/CreateOrganization";
 import CreateProject from "./pages/CreateProject";
@@ -33,13 +35,35 @@ function App() {
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
 
+      {/* Organization invitation route */}
+      <Route
+        path="/accept-invitation"
+        element={<AcceptInvitation />}
+      />
+
       {/* Protected routes */}
       <Route element={<ProtectedRoute />}>
         <Route path="/organizations" element={<Organizations />} />
-        <Route path="/organizations/create" element={<CreateOrganization />} />
-        <Route path="/settings/organization" element={<OrganizationSettings />} />
-        <Route path="/projects/:id/settings" element={<ProjectSettings />} />
-        <Route path="/projects/create" element={<CreateProject />} />
+
+        <Route
+          path="/organizations/create"
+          element={<CreateOrganization />}
+        />
+
+        <Route
+          path="/settings/organization"
+          element={<OrganizationSettings />}
+        />
+
+        <Route
+          path="/projects/:id/settings"
+          element={<ProjectSettings />}
+        />
+
+        <Route
+          path="/projects/create"
+          element={<CreateProject />}
+        />
 
         <Route path="/dashboard" element={<WorkspaceLayout />} />
 
@@ -52,7 +76,6 @@ function App() {
             </>
           }
         />
-
       </Route>
     </Routes>
   );

@@ -8,7 +8,6 @@ import {
   Check,
   MailPlus,
   UsersRound,
- 
   Plus,
   ChevronDown,
 } from "lucide-react";
@@ -130,53 +129,80 @@ export default function OrganizationSettings() {
 
   const currentUserId = user?._id ?? user?.id ?? "";
 
+  // Combine members, memberships, and admin.
+  // Use MongoDB _id to avoid duplicate users.
   const members = useMemo<OrganizationMembership[]>(() => {
     if (!organization) return [];
 
-    const existingMemberships = organization.memberships ?? [];
+    const membersMap = new Map<string, OrganizationMembership>();
+
     const adminId = getMemberId(organization.admin);
 
-    if (existingMemberships.length > 0) {
-      const normalized = [...existingMemberships];
+    // 1. Add users from memberships first so their roles are preserved.
+    for (const membership of organization.memberships ?? []) {
+      const memberId = getMemberId(membership.user);
 
-      if (
-        adminId &&
-        !normalized.some(
-          (membership) => getMemberId(membership.user) === adminId
-        )
-      ) {
-        normalized.unshift({
-          user: organization.admin as string | ProjectUser,
-          role: "Owner",
-        });
-      }
+      if (!memberId) continue;
 
-      return normalized;
-    }
-
-    const oldMembers = organization.members ?? [];
-
-    const normalized = oldMembers.map((member) => ({
-      user: member,
-      role:
-        getMemberId(member) === adminId
-          ? ("Owner" as OrganizationRole)
-          : ("Member" as OrganizationRole),
-    }));
-
-    if (
-      organization.admin &&
-      !normalized.some(
-        (membership) => getMemberId(membership.user) === adminId
-      )
-    ) {
-      normalized.unshift({
-        user: organization.admin,
-        role: "Owner",
+      membersMap.set(memberId, {
+        user: membership.user,
+        role: membership.role,
       });
     }
 
-    return normalized;
+    // 2. Add users from the members array.
+    for (const member of organization.members ?? []) {
+      const memberId = getMemberId(member);
+
+      if (!memberId) continue;
+
+      const existingMembership = membersMap.get(memberId);
+
+      if (existingMembership) {
+        // Prefer populated user details over a plain MongoDB ID.
+        if (
+          typeof existingMembership.user === "string" &&
+          typeof member !== "string"
+        ) {
+          membersMap.set(memberId, {
+            ...existingMembership,
+            user: member,
+          });
+        }
+
+        continue;
+      }
+
+      membersMap.set(memberId, {
+        user: member,
+        role:
+          memberId === adminId
+            ? "Owner"
+            : "Member",
+      });
+    }
+
+    // 3. Make sure the organization admin is included.
+    if (organization.admin && adminId) {
+      const existingMembership = membersMap.get(adminId);
+
+      if (!existingMembership) {
+        membersMap.set(adminId, {
+          user: organization.admin,
+          role: "Owner",
+        });
+      } else if (
+        typeof existingMembership.user === "string" &&
+        typeof organization.admin !== "string"
+      ) {
+        membersMap.set(adminId, {
+          ...existingMembership,
+          user: organization.admin,
+        });
+      }
+    }
+
+    return Array.from(membersMap.values());
   }, [organization]);
 
   const visibleMembers = useMemo(
@@ -554,8 +580,6 @@ export default function OrganizationSettings() {
             <div className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-600">
               {organization?.org_name ?? selectedOrganization.org_name}
             </div>
-
-          
           </div>
         </div>
 
@@ -566,8 +590,6 @@ export default function OrganizationSettings() {
           >
             <Check size={17} className="shrink-0" />
             {notice}
-
-            
           </div>
         )}
 

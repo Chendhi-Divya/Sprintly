@@ -16,14 +16,17 @@ export type TaskType =
   | "Epic"
   | "Story"
   | "Task"
-  | "Bug"
-  
+  | "Bug";
 
 export type TaskPriority =
   | "Low"
   | "Medium"
-  | "High"
+  | "High";
 
+export interface TaskOrganization {
+  _id?: string;
+  org_id?: string;
+}
 
 export interface TaskUser {
   _id: string;
@@ -35,6 +38,7 @@ export interface TaskProject {
   _id: string;
   name: string;
   key?: string;
+  organization?: string | TaskOrganization;
 }
 
 export interface ParentTask {
@@ -230,16 +234,14 @@ export interface Project {
   key?: string;
   description?: string;
 
-  organization?:
-    | string
-    | {
-        _id?: string;
-        org_id?: string;
-      };
+  organization?: string | TaskOrganization;
 
   organizationName?: string;
   owner?: string | ProjectUser | null;
-  members?: string[];
+
+  // Supports both populated and unpopulated members.
+  members?: Array<string | ProjectUser>;
+
   createdAt?: string;
 }
 
@@ -510,6 +512,7 @@ export const taskApi = createApi({
 
     getTasks: builder.query<TasksResponse, void>({
       query: () => "/tasks",
+
       providesTags: (result) =>
         result
           ? [
@@ -524,6 +527,7 @@ export const taskApi = createApi({
 
     getTaskById: builder.query<TaskResponse, string>({
       query: (id) => `/tasks/${id}`,
+
       providesTags: (_result, _error, id) => [
         { type: "Tasks", id },
       ],
@@ -675,7 +679,10 @@ export const taskApi = createApi({
 
     getProjectById: builder.query<ProjectResponse, string>({
       query: (projectId) => `/projects/${projectId}`,
-      providesTags: ["Projects"],
+
+      providesTags: (_result, _error, projectId) => [
+        { type: "Projects", id: projectId },
+      ],
     }),
 
     createProject: builder.mutation<
@@ -701,10 +708,11 @@ export const taskApi = createApi({
         body,
       }),
 
-      invalidatesTags: [
+      invalidatesTags: (_result, _error, arg) => [
         "Projects",
+        { type: "Projects", id: arg.id },
         "Tasks",
-        "ProjectMembers",
+        { type: "ProjectMembers", id: arg.id },
       ],
     }),
 
@@ -730,7 +738,9 @@ export const taskApi = createApi({
     >({
       query: (projectId) => `/projects/${projectId}/members`,
 
-      providesTags: ["ProjectMembers"],
+      providesTags: (_result, _error, projectId) => [
+        { type: "ProjectMembers", id: projectId },
+      ],
     }),
 
     addProjectMember: builder.mutation<
@@ -743,9 +753,10 @@ export const taskApi = createApi({
         body: { userId },
       }),
 
-      invalidatesTags: [
+      invalidatesTags: (_result, _error, arg) => [
         "Projects",
-        "ProjectMembers",
+        { type: "Projects", id: arg.id },
+        { type: "ProjectMembers", id: arg.id },
       ],
     }),
 
@@ -758,9 +769,10 @@ export const taskApi = createApi({
         method: "DELETE",
       }),
 
-      invalidatesTags: [
+      invalidatesTags: (_result, _error, arg) => [
         "Projects",
-        "ProjectMembers",
+        { type: "Projects", id: arg.id },
+        { type: "ProjectMembers", id: arg.id },
         "Tasks",
       ],
     }),
@@ -774,6 +786,7 @@ export const taskApi = createApi({
       void
     >({
       query: () => "/organizations",
+
       providesTags: ["Organizations"],
     }),
 
@@ -782,6 +795,7 @@ export const taskApi = createApi({
       string
     >({
       query: (orgId) => `/organizations/${orgId}`,
+
       providesTags: ["Organizations"],
     }),
 
@@ -836,6 +850,7 @@ export const taskApi = createApi({
       void
     >({
       query: () => "/organizations/invitations",
+
       providesTags: ["Organizations"],
     }),
 

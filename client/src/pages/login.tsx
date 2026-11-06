@@ -18,9 +18,11 @@ import { Label } from "@/components/ui/label";
 import { Eye, EyeOff } from "lucide-react";
 
 import { useLoginMutation } from "../services/authApi";
+
 import {
   useLazyGetOrganizationsQuery,
   useLazyGetProjectsQuery,
+  useAcceptOrganizationInvitationByTokenMutation,
 } from "../services/taskApi";
 
 const loginSchema = z.object({
@@ -59,6 +61,9 @@ export default function Login() {
     { isFetching: isProjectsLoading },
   ] = useLazyGetProjectsQuery();
 
+  const [acceptInvitation, { isLoading: isInvitationLoading }] =
+    useAcceptOrganizationInvitationByTokenMutation();
+
   const {
     register,
     handleSubmit,
@@ -71,66 +76,62 @@ export default function Login() {
     setErrorMessage("");
 
     try {
-      // Step 1: Login using the updated email
-     const response = await loginUser({
-  email: data.email.trim().toLowerCase(),
-  password: data.password,
-}).unwrap();
+      // Step 1: Login
+      const response = await loginUser({
+        email: data.email.trim().toLowerCase(),
+        password: data.password,
+      }).unwrap();
 
-console.log("Login response:", response);
-console.log("Token received:", response.token);
+      if (!response.token) {
+        setErrorMessage(
+          "Login successful, but authentication token was not received."
+        );
+        return;
+      }
 
-if (!response.token) {
-  console.error("Login response does not contain a token:", response);
+      // Step 2: Save authentication details
+      dispatch(
+        setCredentials({
+          token: response.token,
+          user: response.user,
+        })
+      );
 
-  setErrorMessage(
-    "Login successful, but authentication token was not received."
-  );
+      // Step 3: Check whether the user has an invitation
+      const invitationToken = sessionStorage.getItem(
+        "organizationInvitationToken"
+      );
 
-  return;
-}
+      if (invitationToken) {
+        try {
+          await acceptInvitation({
+            token: invitationToken,
+          }).unwrap();
 
-dispatch(
-  setCredentials({
-    token: response.token,
-    user: response.user,
-  })
-);
-console.log(
-  "After login - token exists:",
-  Boolean(localStorage.getItem("token"))
-);
+          // Remove token after successful acceptance
+          sessionStorage.removeItem(
+            "organizationInvitationToken"
+          );
+        } catch (error: any) {
+          console.error("Invitation acceptance failed:", error);
 
-console.log(
-  "After login - token length:",
-  localStorage.getItem("token")?.length
-);
-console.log("Redux token:", localStorage.getItem("token"));
+          setErrorMessage(
+            error?.data?.message ||
+              "Login successful, but invitation acceptance failed."
+          );
 
-console.log(
-  "Token saved:",
-  Boolean(localStorage.getItem("token"))
-);
+          return;
+        }
+      }
 
-console.log("Saved token:", localStorage.getItem("token"));
-console.log(
-  "Before fetching organizations - token exists:",
-  Boolean(localStorage.getItem("token"))
-);
-
-console.log(
-  "Before fetching organizations - token length:",
-  localStorage.getItem("token")?.length
-);
-
-      // Step 3: Fetch organizations
+      // Step 4: Fetch organizations
       const organizationResponse =
         await getOrganizations().unwrap();
 
       const organizations =
         organizationResponse.organizations ?? [];
 
-      // No organizations: create an organization
+      // No organizations: create or join an organization
       if (organizations.length === 0) {
         navigate("/organizations", { replace: true });
         return;
@@ -147,7 +148,7 @@ console.log(
 
       dispatch(setSelectedOrganization(organization));
 
-      // Step 4: Fetch projects
+      // Step 5: Fetch projects
       const projectResponse = await getProjects(
         organization._id
       ).unwrap();
@@ -162,7 +163,6 @@ console.log(
 
       // Projects exist: open dashboard
       navigate("/dashboard", { replace: true });
-
     } catch (error: any) {
       console.error("Login or workspace loading failed:", error);
 
@@ -176,7 +176,8 @@ console.log(
   const isLoading =
     isLoginLoading ||
     isOrganizationsLoading ||
-    isProjectsLoading;
+    isProjectsLoading ||
+    isInvitationLoading;
 
   return (
     <div className="min-h-screen flex items-center justify-center">

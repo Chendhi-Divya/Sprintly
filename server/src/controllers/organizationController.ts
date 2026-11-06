@@ -28,18 +28,20 @@ function getMemberRole(
 ): OrganizationRole | undefined {
   if (!userId) return undefined;
 
-  if (organization.admin?.toString() === userId.toString()) {
+  const id = userId.toString();
+
+  if (organization.admin?.toString() === id) {
     return "Owner";
   }
 
   const membership = organization.memberships?.find(
-    (item: any) => item.user?.toString() === userId.toString()
+    (item: any) => item.user?.toString() === id
   );
 
   return membership?.role;
 }
 
-// Add missing membership records for older organizations.
+// Synchronize members and memberships for existing organizations.
 async function ensureMemberships(organization: any) {
   organization.members = organization.members ?? [];
   organization.memberships = organization.memberships ?? [];
@@ -50,55 +52,76 @@ async function ensureMemberships(organization: any) {
     throw new Error("Organization owner is missing");
   }
 
-  const ownerAlreadyMember = organization.members.some(
-    (member: any) => member.toString() === adminId
-  );
+  // Collect unique member IDs.
+  const memberIds = new Set<string>();
 
-  if (!ownerAlreadyMember) {
-    organization.members.push(organization.admin);
+  for (const member of organization.members) {
+    const memberId = member?._id
+      ? member._id.toString()
+      : member?.toString();
+
+    if (memberId && mongoose.isValidObjectId(memberId)) {
+      memberIds.add(memberId);
+    }
   }
 
-  const seenUsers = new Set<string>();
+  // Collect unique membership records and preserve roles.
+  const membershipMap = new Map<string, any>();
 
-  organization.memberships = organization.memberships.filter(
-    (membership: any) => {
-      const memberId = membership.user?.toString();
+  for (const membership of organization.memberships) {
+    const memberId = membership.user?._id
+      ? membership.user._id.toString()
+      : membership.user?.toString();
 
-      if (!memberId || seenUsers.has(memberId)) {
-        return false;
-      }
-
-      seenUsers.add(memberId);
-      return true;
+    if (!memberId || !mongoose.isValidObjectId(memberId)) {
+      continue;
     }
-  );
 
-  for (const memberId of organization.members) {
-    const memberIdString = memberId.toString();
-
-    const membershipExists = organization.memberships.some(
-      (membership: any) =>
-        membership.user?.toString() === memberIdString
-    );
-
-    if (!membershipExists) {
-      organization.memberships.push({
-        user: memberId,
-        role: memberIdString === adminId ? "Owner" : "Member",
+    if (!membershipMap.has(memberId)) {
+      membershipMap.set(memberId, {
+        user: new mongoose.Types.ObjectId(memberId),
+        role: membership.role ?? "Member",
       });
     }
   }
 
-  const ownerMembership = organization.memberships.find(
-    (membership: any) =>
-      membership.user?.toString() === adminId
-  );
+  // Include every membership user in the members array.
+  for (const memberId of membershipMap.keys()) {
+    memberIds.add(memberId);
+  }
+
+  // Always include the current Owner.
+  memberIds.add(adminId);
+
+  // Create missing membership records.
+  for (const memberId of memberIds) {
+    if (!membershipMap.has(memberId)) {
+      membershipMap.set(memberId, {
+        user: new mongoose.Types.ObjectId(memberId),
+        role: memberId === adminId ? "Owner" : "Member",
+      });
+    }
+  }
+
+  // Ensure the current Owner has the Owner role.
+  const ownerMembership = membershipMap.get(adminId);
 
   if (ownerMembership) {
     ownerMembership.role = "Owner";
   }
 
+  // Save synchronized arrays.
+  organization.members = Array.from(memberIds).map(
+    (memberId) => new mongoose.Types.ObjectId(memberId)
+  );
+
+  organization.memberships = Array.from(
+    membershipMap.values()
+  );
+
+  organization.markModified("members");
   organization.markModified("memberships");
+
   await organization.save();
 }
 
@@ -293,10 +316,7 @@ export const updateOrganizationMemberRole = async (
       });
     }
 
-    if (
-      membership.role === "Owner" &&
-      actorRole !== "Owner"
-    ) {
+    if (membership.role === "Owner" && actorRole !== "Owner") {
       return res.status(403).json({
         message: "Only the Owner can change the Owner role",
       });
@@ -527,10 +547,8 @@ export const createOrganizationInvitation = async (
       });
     }
 
-    // Generate a secure invitation token.
     const inviteToken = randomBytes(32).toString("base64url");
 
-    // Store only the hashed token in MongoDB.
     const tokenHash = createHash("sha256")
       .update(inviteToken)
       .digest("hex");
@@ -563,7 +581,6 @@ export const createOrganizationInvitation = async (
     let emailSent = true;
 
     try {
-      // Pass all four arguments expected by emailService.
       await sendOrganizationInvitationEmail(
         email,
         organization.org_name,
@@ -875,6 +892,67 @@ export const getOrganizationInvitations = async (
 };
 
 // --------------------------------------------------
+// REVOKE ORGANIZATION INVITATION
+// --------------------------------------------------
+
+export const revokeOrganizationInvitation = async (
+  req: Request,
+  res: Response
+) => {
+  try {
+    const org_id = routeParam(req.params.org_id);
+    const invitationId = routeParam(req.params.invitationId);
+    const userId = (req as any).userId;
+
+    if (!mongoose.isValidObjectId(invitationId)) {
+      return res.status(400).json({
+        message: "Invalid invitation ID",
+      });
+    }
+
+    const organization = await Organization.findOne({ org_id });
+
+    if (!organization) {
+      return res.status(404).json({
+        message: "Organization not found",
+      });
+    }
+
+    await ensureMemberships(organization);
+
+    const role = getMemberRole(organization, userId);
+
+    if (role !== "Owner" && role !== "Admin") {
+      return res.status(403).json({
+        message:
+          "Only an organization Owner or Admin can revoke invitations",
+      });
+    }
+
+    const invitation = await OrganizationInvitation.findOneAndDelete({
+      _id: invitationId,
+      organizationId: organization.org_id,
+    });
+
+    if (!invitation) {
+      return res.status(404).json({
+        message: "Invitation not found",
+      });
+    }
+
+    return res.status(200).json({
+      message: "Invitation revoked successfully",
+    });
+  } catch (error) {
+    console.error("REVOKE ORGANIZATION INVITATION ERROR:", error);
+
+    return res.status(500).json({
+      message: "Failed to revoke invitation",
+    });
+  }
+};
+
+// --------------------------------------------------
 // ACCEPT ORGANIZATION INVITATION BY ID
 // --------------------------------------------------
 
@@ -975,20 +1053,26 @@ export const acceptOrganizationInvitationByToken = async (
   res: Response
 ) => {
   try {
-    const user = await User.findById(
-      (req as any).userId
-    ).select("email");
+    const userId = (req as any).userId;
 
-    const token =
-      typeof req.body.token === "string"
-        ? req.body.token
-        : "";
+    if (!userId) {
+      return res.status(401).json({
+        message: "User not authenticated",
+      });
+    }
+
+    const user = await User.findById(userId).select("email");
 
     if (!user?.email) {
       return res.status(401).json({
         message: "User email is unavailable",
       });
     }
+
+    const token =
+      typeof req.body.token === "string"
+        ? req.body.token
+        : "";
 
     if (!/^[A-Za-z0-9_-]{40,50}$/.test(token)) {
       return res.status(400).json({
@@ -1011,10 +1095,13 @@ export const acceptOrganizationInvitationByToken = async (
       });
     }
 
-    if (user.email.toLowerCase() !== invitation.email) {
+    if (
+      user.email.trim().toLowerCase() !==
+      invitation.email.trim().toLowerCase()
+    ) {
       return res.status(403).json({
         message:
-          "Register or sign in using the email address that received this invitation",
+          "Please sign in using the email address that received this invitation",
       });
     }
 
@@ -1035,16 +1122,23 @@ export const acceptOrganizationInvitationByToken = async (
         member.toString() === user._id.toString()
     );
 
-    if (!alreadyMember) {
-      organization.members.push(user._id);
+    if (alreadyMember) {
+      await invitation.deleteOne();
 
-      organization.memberships.push({
-        user: user._id,
-        role: invitation.role,
+      return res.status(200).json({
+        message: "You are already a member of this organization",
+        organization,
       });
-
-      await organization.save();
     }
+
+    organization.members.push(user._id);
+
+    organization.memberships.push({
+      user: user._id,
+      role: invitation.role,
+    });
+
+    await organization.save();
 
     await invitation.deleteOne();
 
@@ -1060,82 +1154,6 @@ export const acceptOrganizationInvitationByToken = async (
 
     return res.status(500).json({
       message: "Failed to accept invitation",
-    });
-  }
-};
-
-// --------------------------------------------------
-// REVOKE ORGANIZATION INVITATION
-// --------------------------------------------------
-
-export const revokeOrganizationInvitation = async (
-  req: Request,
-  res: Response
-) => {
-  try {
-    const org_id = routeParam(req.params.org_id);
-    const invitationId = routeParam(req.params.invitationId);
-    const userId = (req as any).userId;
-
-    if (!userId) {
-      return res.status(401).json({
-        message: "User not authenticated",
-      });
-    }
-
-    if (!org_id) {
-      return res.status(400).json({
-        message: "Organization ID is required",
-      });
-    }
-
-    if (!mongoose.isValidObjectId(invitationId)) {
-      return res.status(400).json({
-        message: "Invalid invitation ID",
-      });
-    }
-
-    const organization = await Organization.findOne({ org_id });
-
-    if (!organization) {
-      return res.status(404).json({
-        message: "Organization not found",
-      });
-    }
-
-    await ensureMemberships(organization);
-
-    const role = getMemberRole(organization, userId);
-
-    if (role !== "Owner" && role !== "Admin") {
-      return res.status(403).json({
-        message:
-          "Only an organization Owner or Admin can revoke invitations",
-      });
-    }
-
-    const invitation = await OrganizationInvitation.findOne({
-      _id: invitationId,
-      organizationId: organization.org_id,
-    });
-
-    if (!invitation) {
-      return res.status(404).json({
-        message: "Invitation not found",
-      });
-    }
-
-    await invitation.deleteOne();
-
-    return res.status(200).json({
-      message: "Invitation revoked successfully",
-    });
-  } catch (error) {
-    console.error("REVOKE ORGANIZATION INVITATION ERROR:", error);
-
-    return res.status(500).json({
-      message: "Failed to revoke invitation",
-      error: error instanceof Error ? error.message : "Unknown error",
     });
   }
 };
@@ -1232,6 +1250,7 @@ export const getMyOrganizations = async (
       $or: [
         { members: userId },
         { admin: userId },
+        { "memberships.user": userId },
       ],
     });
 
@@ -1377,36 +1396,75 @@ export const getOrganizationById = async (
       });
     }
 
-    const isMember =
-      organization.admin.toString() === loggedInUserId.toString() ||
-      organization.members.some(
-        (member: any) =>
-          member.toString() === loggedInUserId.toString()
-      );
+    const userId = loggedInUserId.toString();
 
-    if (!isMember) {
+    // Check membership in either array before repairing old records.
+    const isOwner =
+      organization.admin?.toString() === userId;
+
+    const isInMembers = organization.members.some(
+      (member: any) => member.toString() === userId
+    );
+
+    const isInMemberships = organization.memberships.some(
+      (membership: any) =>
+        membership.user?.toString() === userId
+    );
+
+    if (!isOwner && !isInMembers && !isInMemberships) {
       return res.status(403).json({
         message: "You are not a member of this organization",
       });
     }
 
+    // Synchronize both arrays.
     await ensureMemberships(organization);
 
+    // Populate user details for frontend display.
     await organization.populate([
-      { path: "admin", select: "name email" },
-      { path: "createdBy", select: "name email" },
-      { path: "members", select: "name email" },
-      { path: "memberships.user", select: "name email" },
+      {
+        path: "admin",
+        select: "name email",
+      },
+      {
+        path: "createdBy",
+        select: "name email",
+      },
+      {
+        path: "members",
+        select: "name email",
+      },
+      {
+        path: "memberships.user",
+        select: "name email",
+      },
     ]);
 
     return res.status(200).json({
-      organization,
+      organization: {
+        _id: organization._id,
+        org_id: organization.org_id,
+        org_name: organization.org_name,
+        description: organization.description,
+        logoUrl: organization.logoUrl,
+        slug: organization.slug,
+        admin: organization.admin,
+        createdBy: organization.createdBy,
+        members: organization.members,
+        memberships: organization.memberships,
+        createdAt: organization.createdAt,
+        updatedAt: organization.updatedAt,
+      },
     });
   } catch (error) {
     console.error("GET ORGANIZATION ERROR:", error);
 
     return res.status(500).json({
       message: "Failed to get organization",
+      error:
+        error instanceof Error
+          ? error.message
+          : "Unknown error",
     });
   }
 };

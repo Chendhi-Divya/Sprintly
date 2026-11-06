@@ -1,5 +1,4 @@
-
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import TaskBoard from "./TaskBoard";
 import ProjectHeader from "../components/ProjectHeader";
 
@@ -31,6 +30,24 @@ export default function Dashboard({
   const [activeView, setActiveView] = useState<ViewType>("Board");
   const [searchText, setSearchText] = useState("");
   const [filters, setFilters] = useState<TaskFilters>(initialFilters);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+
+  useEffect(() => {
+    function handleOpenTask(event: Event) {
+      const customEvent = event as CustomEvent<{ taskId?: string }>;
+      const taskId = customEvent.detail?.taskId;
+
+      if (taskId) {
+        setSelectedTaskId(taskId);
+      }
+    }
+
+    window.addEventListener("sprintly:open-task", handleOpenTask);
+
+    return () => {
+      window.removeEventListener("sprintly:open-task", handleOpenTask);
+    };
+  }, []);
 
   function handleClearFilters() {
     setFilters(initialFilters);
@@ -55,6 +72,9 @@ export default function Dashboard({
         activeView={activeView}
         searchText={searchText}
         filters={filters}
+        selectedTaskId={selectedTaskId}
+        onTaskOpen={setSelectedTaskId}
+        onTaskClose={() => setSelectedTaskId(null)}
       />
     </div>
   );

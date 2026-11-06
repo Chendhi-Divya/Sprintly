@@ -1,8 +1,8 @@
-
 import { useMemo, useState } from "react";
 import { ChevronDown, LoaderCircle } from "lucide-react";
 
 import {
+  taskApi,
   useGetTasksQuery,
   useUpdateTaskMutation,
   type TaskStatus,
@@ -19,6 +19,9 @@ type TaskBoardProps = {
   activeView: ViewType;
   searchText: string;
   filters: TaskFilters;
+  selectedTaskId: string | null;
+  onTaskOpen: (taskId: string) => void;
+  onTaskClose: () => void;
 };
 
 const columns: TaskStatus[] = [
@@ -33,24 +36,31 @@ export default function TaskBoard({
   activeView,
   searchText,
   filters,
+  selectedTaskId,
+  onTaskOpen,
+  onTaskClose,
 }: TaskBoardProps) {
   const { data, isLoading, isError } = useGetTasksQuery();
 
   const [updateTask] = useUpdateTaskMutation();
+  const prefetchTask = taskApi.usePrefetch("getTaskById");
 
   const [message, setMessage] = useState("");
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   const [updatingTaskIds, setUpdatingTaskIds] = useState<Set<string>>(
     () => new Set()
   );
 
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
-  const [dragOverStatus, setDragOverStatus] = useState<TaskStatus | null>(null);
+
+  const [dragOverStatus, setDragOverStatus] =
+    useState<TaskStatus | null>(null);
+
+  const allTasks = data?.tasks ?? [];
 
   // Get tasks belonging to the selected project.
   const tasks = useMemo(() => {
-    return (data?.tasks ?? []).filter((task) => {
+    return allTasks.filter((task) => {
       const projectId =
         typeof task.project === "string"
           ? task.project
@@ -58,7 +68,7 @@ export default function TaskBoard({
 
       return projectId === selectedProjectId;
     });
-  }, [data?.tasks, selectedProjectId]);
+  }, [allTasks, selectedProjectId]);
 
   // Apply search and filters.
   const filteredTasks = useMemo(() => {
@@ -99,6 +109,11 @@ export default function TaskBoard({
     });
   }, [tasks, searchText, filters]);
 
+  // Prefetch task details before the user clicks.
+  function handleTaskHover(taskId: string) {
+    prefetchTask(taskId, { ifOlderThan: 30 });
+  }
+
   // Update task status.
   async function handleStatusChange(
     taskId: string,
@@ -128,15 +143,11 @@ export default function TaskBoard({
     }
   }
 
-  // Open task details.
-  function openTaskDetails(taskId: string) {
-    setSelectedTaskId(taskId);
-  }
-
-  // Close task details.
-  function closeTaskDetails() {
-    setSelectedTaskId(null);
-  }
+  // Find the selected task in the complete task list.
+  // This also works when a notification opens a task from another project.
+  const selectedTask = allTasks.find(
+    (task) => task._id === selectedTaskId
+  );
 
   if (isLoading) {
     return (
@@ -223,16 +234,16 @@ export default function TaskBoard({
                     <td className="max-w-xs px-4 py-4">
                       <button
                         type="button"
-                        onClick={() => openTaskDetails(task._id)}
+                        onMouseEnter={() => handleTaskHover(task._id)}
+                        onFocus={() => handleTaskHover(task._id)}
+                        onClick={() => onTaskOpen(task._id)}
                         className="text-left font-medium text-gray-900 hover:text-blue-600 hover:underline"
                       >
                         {task.title}
                       </button>
                     </td>
 
-                    <td className="px-4 py-4">
-                      {task.type}
-                    </td>
+                    <td className="px-4 py-4">{task.type}</td>
 
                     <td className="px-4 py-4">
                       <div className="relative w-fit">
@@ -283,13 +294,9 @@ export default function TaskBoard({
                       </span>
                     </td>
 
-                    <td className="px-4 py-4">
-                      {assignee}
-                    </td>
+                    <td className="px-4 py-4">{assignee}</td>
 
-                    <td className="px-4 py-4">
-                      {reporter}
-                    </td>
+                    <td className="px-4 py-4">{reporter}</td>
 
                     <td className="whitespace-nowrap px-4 py-4 text-gray-600">
                       {task.dueDate
@@ -375,6 +382,8 @@ export default function TaskBoard({
                     <div
                       key={task._id}
                       draggable={!updatingTaskIds.has(task._id)}
+                      onMouseEnter={() => handleTaskHover(task._id)}
+                      onFocus={() => handleTaskHover(task._id)}
                       onDragStart={(event) => {
                         event.dataTransfer.effectAllowed = "move";
                         event.dataTransfer.setData("text/plain", task._id);
@@ -400,7 +409,7 @@ export default function TaskBoard({
                         }}
                         isUpdating={updatingTaskIds.has(task._id)}
                         onStatusChange={handleStatusChange}
-                        onClick={() => openTaskDetails(task._id)}
+                        onClick={() => onTaskOpen(task._id)}
                       />
                     </div>
                   ))}
@@ -421,7 +430,8 @@ export default function TaskBoard({
       {selectedTaskId && (
         <TaskDetailsPanel
           taskId={selectedTaskId}
-          onClose={closeTaskDetails}
+          initialTask={selectedTask}
+          onClose={onTaskClose}
         />
       )}
     </div>
