@@ -1,4 +1,3 @@
-
 import { createSlice } from "@reduxjs/toolkit";
 import type { PayloadAction } from "@reduxjs/toolkit";
 
@@ -56,10 +55,7 @@ const authSlice = createSlice({
       state.user = action.payload.user;
 
       localStorage.setItem("token", action.payload.token);
-      localStorage.setItem(
-        "user",
-        JSON.stringify(action.payload.user)
-      );
+      localStorage.setItem("user", JSON.stringify(action.payload.user));
     },
 
     updateUser: (

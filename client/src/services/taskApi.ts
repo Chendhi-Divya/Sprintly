@@ -239,7 +239,6 @@ export interface Project {
   organizationName?: string;
   owner?: string | ProjectUser | null;
 
-  // Supports both populated and unpopulated members.
   members?: Array<string | ProjectUser>;
 
   createdAt?: string;
@@ -361,6 +360,20 @@ export interface CreateOrganizationWithFirstProjectResponse {
   message: string;
   organization: Organization;
   project: Project;
+}
+
+// ==========================================
+// DELETE ORGANIZATION TYPES
+// ==========================================
+
+export interface DeleteOrganizationRequest {
+  orgId: string;
+  password: string;
+}
+
+export interface DeleteOrganizationResponse {
+  message: string;
+  deletedOrganizationId: string;
 }
 
 // ==========================================
@@ -842,6 +855,32 @@ export const taskApi = createApi({
     }),
 
     // ======================================
+    // DELETE ORGANIZATION
+    // ======================================
+
+    deleteOrganization: builder.mutation<
+      DeleteOrganizationResponse,
+      DeleteOrganizationRequest
+    >({
+      query: ({ orgId, password }) => ({
+        url: `/organizations/${orgId}`,
+        method: "DELETE",
+        body: { password },
+      }),
+
+      invalidatesTags: [
+        "Organizations",
+        "Projects",
+        "Tasks",
+        "ProjectMembers",
+        "Notifications",
+        "TaskComments",
+        "TaskSubtasks",
+        "TaskAttachments",
+      ],
+    }),
+
+    // ======================================
     // ORGANIZATION INVITATIONS
     // ======================================
 
@@ -1036,6 +1075,7 @@ export const {
   useCreateOrganizationMutation,
   useCreateOrganizationWithFirstProjectMutation,
   useUpdateOrganizationMutation,
+  useDeleteOrganizationMutation,
 
   // Organization invitations
   useGetMyOrganizationInvitationsQuery,

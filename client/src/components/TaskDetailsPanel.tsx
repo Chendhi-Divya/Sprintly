@@ -11,11 +11,13 @@ import {
   Flag,
   Paperclip,
   MessageSquare,
-  Upload,
   Send,
   Check,
   Plus,
   ChevronDown,
+  FileText,
+  Image,
+  Upload,
 } from "lucide-react";
 
 import {
@@ -27,6 +29,7 @@ import {
   useGetTaskCommentsQuery,
   useAddTaskCommentMutation,
   type TaskPriority,
+  type TaskAttachment,
 } from "../services/taskApi";
 
 type TaskItem = NonNullable<
@@ -49,13 +52,65 @@ type OrganizationMember = {
 
 const priorities: TaskPriority[] = ["Low", "Medium", "High"];
 
+function getFailureMessage(
+  error: unknown,
+  fallback: string
+): string {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "data" in error
+  ) {
+    const data = (error as { data?: unknown }).data;
+
+    if (
+      typeof data === "object" &&
+      data !== null &&
+      "message" in data &&
+      typeof data.message === "string"
+    ) {
+      return data.message;
+    }
+  }
+
+  return fallback;
+}
+
+function formatFileSize(size?: number): string {
+  if (!size) return "";
+
+  if (size < 1024) {
+    return `${size} B`;
+  }
+
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function getAttachmentName(
+  attachment: TaskAttachment
+): string {
+  return (
+    attachment.originalName ||
+    attachment.filename ||
+    "Attachment"
+  );
+}
+
 export default function TaskDetailsPanel({
   taskId,
   initialTask,
   onClose,
 }: TaskDetailsPanelProps) {
-  const { data, isLoading, isError } =
-    useGetTaskByIdQuery(taskId);
+  const {
+    data,
+    isLoading,
+    isError,
+    refetch: refetchTask,
+  } = useGetTaskByIdQuery(taskId);
 
   const {
     data: allTasksData,
@@ -96,6 +151,9 @@ export default function TaskDetailsPanel({
   const task = data?.task ?? initialTask;
   const comments = commentsData?.comments ?? [];
 
+  const attachments: TaskAttachment[] =
+    task?.attachments ?? [];
+
   // Organization members
   const organization = organizationData?.organization;
 
@@ -132,6 +190,8 @@ export default function TaskDetailsPanel({
   const [selectedFile, setSelectedFile] = useState<File | null>(
     null
   );
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [commentText, setCommentText] = useState("");
 
@@ -305,8 +365,11 @@ export default function TaskDetailsPanel({
 
       setIsEditingTitle(false);
       showToast("Task name updated successfully.");
-    } catch {
-      showToast("Failed to update task name.", "error");
+    } catch (error: unknown) {
+      showToast(
+        getFailureMessage(error, "Failed to update task name."),
+        "error"
+      );
     }
   }
 
@@ -320,8 +383,11 @@ export default function TaskDetailsPanel({
 
       setIsEditingDescription(false);
       showToast("Description updated successfully.");
-    } catch {
-      showToast("Failed to update description.", "error");
+    } catch (error: unknown) {
+      showToast(
+        getFailureMessage(error, "Failed to update description."),
+        "error"
+      );
     }
   }
 
@@ -337,8 +403,11 @@ export default function TaskDetailsPanel({
       }).unwrap();
 
       showToast("Task details updated successfully.");
-    } catch {
-      showToast("Failed to update task details.", "error");
+    } catch (error: unknown) {
+      showToast(
+        getFailureMessage(error, "Failed to update task details."),
+        "error"
+      );
     }
   }
 
@@ -355,8 +424,11 @@ export default function TaskDetailsPanel({
           ? "Assignee updated successfully."
           : "Assignee removed successfully."
       );
-    } catch {
-      showToast("Failed to update assignee.", "error");
+    } catch (error: unknown) {
+      showToast(
+        getFailureMessage(error, "Failed to update assignee."),
+        "error"
+      );
     }
   }
 
@@ -373,8 +445,11 @@ export default function TaskDetailsPanel({
       setShowEpicInput(false);
 
       showToast("Parent task assigned successfully.");
-    } catch {
-      showToast("Failed to update parent task.", "error");
+    } catch (error: unknown) {
+      showToast(
+        getFailureMessage(error, "Failed to update parent task."),
+        "error"
+      );
     }
   }
 
@@ -395,34 +470,54 @@ export default function TaskDetailsPanel({
 
       setCommentText("");
       showToast("Comment added successfully.");
-    } catch {
+    } catch (error: unknown) {
       showToast(
-        "Failed to add comment. Please try again.",
+        getFailureMessage(
+          error,
+          "Failed to add comment. Please try again."
+        ),
         "error"
       );
     }
   }
 
-  // Upload attachment
-  async function handleFileUpload() {
-    if (!selectedFile) {
-      showToast("Please select a file first.", "error");
-      return;
+  // Open file picker
+  function openAttachmentPicker() {
+    if (isUploading) return;
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+      fileInputRef.current.click();
     }
+  }
+
+  // Upload selected attachment
+  async function handleFileUpload(file: File) {
+    setSelectedFile(file);
 
     try {
       await uploadTaskAttachment({
         taskId,
-        file: selectedFile,
+        file,
       }).unwrap();
 
-      setSelectedFile(null);
+      await refetchTask();
+
       showToast("File uploaded successfully.");
-    } catch {
+    } catch (error: unknown) {
       showToast(
-        "File upload failed. Please try again.",
+        getFailureMessage(
+          error,
+          "File upload failed. Please check the file and try again."
+        ),
         "error"
       );
+    } finally {
+      setSelectedFile(null);
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
     }
   }
 
@@ -443,13 +538,18 @@ export default function TaskDetailsPanel({
         {/* Toast */}
         {toast && (
           <div
+            role="status"
             className={`absolute right-4 top-4 z-[70] flex max-w-[calc(100%-2rem)] items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium shadow-lg ${
               toast.type === "success"
                 ? "bg-green-600 text-white"
                 : "bg-red-600 text-white"
             }`}
           >
-            <Check size={16} />
+            {toast.type === "success" ? (
+              <Check size={16} />
+            ) : (
+              <X size={16} />
+            )}
 
             <span>{toast.text}</span>
 
@@ -477,10 +577,7 @@ export default function TaskDetailsPanel({
 
           <div className="ml-auto flex shrink-0 items-center gap-3">
             {/* Add Epic button and dropdown */}
-            <div
-              ref={epicDropdownRef}
-              className="relative"
-            >
+            <div ref={epicDropdownRef} className="relative">
               <button
                 type="button"
                 onClick={() =>
@@ -496,7 +593,6 @@ export default function TaskDetailsPanel({
                 Add Epic
               </button>
 
-              {/* Dropdown directly below Add Epic */}
               {showEpicInput && (
                 <div className="absolute right-0 top-full z-50 mt-2 w-[min(320px,calc(100vw-2rem))] rounded-xl border border-gray-200 bg-white p-4 shadow-xl">
                   <label
@@ -522,11 +618,14 @@ export default function TaskDetailsPanel({
                           : "Select your Epic"}
                       </option>
 
-                     {availableEpics.map((parentTask) => (
-  <option key={parentTask._id} value={parentTask._id}>
-    {parentTask.title}
-  </option>
-))}
+                      {availableEpics.map((parentTask) => (
+                        <option
+                          key={parentTask._id}
+                          value={parentTask._id}
+                        >
+                          {parentTask.title}
+                        </option>
+                      ))}
                     </select>
 
                     <ChevronDown
@@ -689,80 +788,161 @@ export default function TaskDetailsPanel({
 
             {/* Attachments */}
             <section>
-              <div className="mb-4 flex items-center gap-2">
-                <Paperclip size={18} className="text-gray-500" />
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Paperclip size={18} className="text-gray-500" />
 
-                <h3 className="text-base font-semibold text-gray-900">
-                  Attachments
-                </h3>
-              </div>
+                  <h3 className="text-base font-semibold text-gray-900">
+                    Attachments
+                  </h3>
 
-              <div className="w-full rounded-xl border border-dashed border-gray-300 bg-gray-50/50 p-3 sm:p-4">
-                <label className="flex cursor-pointer flex-col items-center justify-center text-center">
-                  <div className="mb-2 rounded-full bg-blue-50 p-2">
-                    <Upload size={19} className="text-blue-600" />
-                  </div>
-
-                  <span className="text-sm font-semibold text-gray-700">
-                    Choose a file or screenshot
+                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500">
+                    {attachments.length}
                   </span>
+                </div>
 
-                  <span className="mt-1 text-xs text-gray-400">
-                    Select a file from your computer
-                  </span>
-
-                  <input
-                    type="file"
-                    className="hidden"
-                    onChange={(event) => {
-                      setSelectedFile(
-                        event.target.files?.[0] ?? null
-                      );
-                    }}
-                  />
-                </label>
-
-                {selectedFile && (
-                  <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-2.5">
-                    <span className="truncate text-sm font-medium text-gray-700">
-                      {selectedFile.name}
-                    </span>
-
-                    <button
-                      onClick={() => setSelectedFile(null)}
-                      className="shrink-0 text-xs font-medium text-red-500 hover:text-red-700"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                )}
-
-                {selectedFile && (
+                {/* Show New button only when attachments exist */}
+                {attachments.length > 0 && (
                   <button
-                    onClick={() => void handleFileUpload()}
+                    type="button"
+                    onClick={openAttachmentPicker}
                     disabled={isUploading}
-                    className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <Upload size={16} />
-
-                    {isUploading
-                      ? "Uploading..."
-                      : "Upload attachment"}
+                    <Plus size={16} />
+                    New
                   </button>
                 )}
               </div>
+
+              {/* Uploaded attachments */}
+              {attachments.length > 0 && (
+                <div className="space-y-2">
+                  {attachments.map((attachment) => {
+                    const isImage =
+                      attachment.mimetype?.startsWith("image/") ??
+                      /\.(png|jpe?g|gif|webp|svg)$/i.test(
+                        getAttachmentName(attachment)
+                      );
+
+                    return (
+                      <a
+                        key={attachment._id}
+                        href={attachment.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex min-w-0 items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 transition hover:border-blue-300 hover:bg-blue-50/40"
+                      >
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+                          {isImage ? (
+                            <Image size={19} />
+                          ) : (
+                            <FileText size={19} />
+                          )}
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-gray-800">
+                            {getAttachmentName(attachment)}
+                          </p>
+
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-400">
+                            {attachment.size ? (
+                              <span>
+                                {formatFileSize(attachment.size)}
+                              </span>
+                            ) : null}
+
+                            {attachment.uploadedAt ? (
+                              <span>
+                                {new Date(
+                                  attachment.uploadedAt
+                                ).toLocaleDateString()}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        <span className="shrink-0 text-xs font-medium text-blue-600">
+                          Open
+                        </span>
+                      </a>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Large upload box: show only when there are no attachments */}
+              {attachments.length === 0 && (
+                <button
+                  type="button"
+                  onClick={openAttachmentPicker}
+                  disabled={isUploading}
+                  className="flex min-h-[170px] w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 bg-gray-50/70 px-5 py-7 text-center transition hover:border-blue-400 hover:bg-blue-50/40 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+                    {isUploading ? (
+                      <Upload
+                        size={23}
+                        className="animate-pulse"
+                      />
+                    ) : (
+                      <Paperclip size={23} />
+                    )}
+                  </div>
+
+                  <p className="text-sm font-semibold text-gray-700">
+                    {isUploading
+                      ? "Uploading your file..."
+                      : "Please upload your file or image"}
+                  </p>
+
+                  <p className="mt-1 text-xs text-gray-400">
+                    {isUploading
+                      ? selectedFile?.name ?? "Please wait..."
+                      : "Click here to browse and select a file"}
+                  </p>
+
+                  {!isUploading && (
+                    <span className="mt-4 inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-xs font-medium text-gray-600">
+                      <Upload size={14} />
+                      Choose file
+                    </span>
+                  )}
+                </button>
+              )}
+
+              {/* Hidden file input shared by both upload buttons */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,.pdf,.doc,.docx,.txt,.xls,.xlsx,.ppt,.pptx,.zip"
+                className="hidden"
+                disabled={isUploading}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+
+                  if (file) {
+                    void handleFileUpload(file);
+                  }
+                }}
+              />
             </section>
 
-            {/* Activity - Comments only */}
+            {/* Activity */}
             <section>
               <div className="mb-4 flex items-center gap-2">
-                <MessageSquare size={18} className="text-gray-500" />
+                <MessageSquare
+                  size={18}
+                  className="text-gray-500"
+                />
 
                 <h3 className="text-base font-semibold text-gray-900">
                   Activity
                 </h3>
               </div>
 
+              {/* Comments */}
               <div className="w-full space-y-5">
                 <div className="w-full rounded-xl border border-gray-200 bg-white p-3">
                   <textarea

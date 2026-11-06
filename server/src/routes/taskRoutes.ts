@@ -11,12 +11,19 @@ import {
   addTaskComment,
 } from "../controllers/taskController.js";
 
+import {
+  uploadTaskAttachment,
+  getTaskAttachment,
+} from "../controllers/taskAttachmentController.js";
+
 import protect from "../middleware/authMiddleware.js";
 
 import {
   checkProjectMember,
   checkTaskProjectMember,
 } from "../middleware/projectAuthorization.js";
+
+import upload from "../middleware/taskUpload.js";
 
 const router = express.Router();
 
@@ -33,6 +40,23 @@ router.get(
   "/",
   protect,
   getTasks
+);
+
+// Upload an attachment to a task
+router.post(
+  "/:id/attachments",
+  protect,
+  checkTaskProjectMember,
+  upload.single("attachment"),
+  uploadTaskAttachment
+);
+
+// View or download a task attachment
+router.get(
+  "/:id/attachments/:fileId",
+  protect,
+  checkTaskProjectMember,
+  getTaskAttachment
 );
 
 // Get comments for a task

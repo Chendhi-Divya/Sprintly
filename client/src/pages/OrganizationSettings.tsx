@@ -10,11 +10,17 @@ import {
   UsersRound,
   Plus,
   ChevronDown,
+  Trash2,
+  X,
+  AlertTriangle,
 } from "lucide-react";
 
 import Navbar from "../components/Navbar";
 import type { RootState } from "../store/store";
-import { setSelectedOrganization } from "../store/authSlice";
+import {
+  setSelectedOrganization,
+  logout,
+} from "../store/authSlice";
 
 import {
   useAcceptOrganizationInvitationMutation,
@@ -26,6 +32,8 @@ import {
   useRevokeOrganizationInvitationMutation,
   useUpdateOrganizationMemberRoleMutation,
   useUpdateOrganizationMutation,
+  useDeleteOrganizationMutation,
+  useLazyGetOrganizationsQuery,
   type OrganizationRole,
   type OrganizationMembership,
   type ProjectUser,
@@ -65,7 +73,6 @@ function getMemberId(
   user: string | ProjectUser | null | undefined
 ): string {
   if (!user) return "";
-
   return typeof user === "string" ? user : user._id;
 }
 
@@ -84,7 +91,6 @@ export default function OrganizationSettings() {
 
   const locationState = location.state as LocationState | null;
   const requestedTab = locationState?.section;
-
   const isFocusedSettingsView = Boolean(requestedTab);
 
   const [tab, setTab] = useState<SettingsTab>(
@@ -103,6 +109,14 @@ export default function OrganizationSettings() {
   const [removedMemberIds, setRemovedMemberIds] = useState<Set<string>>(
     new Set()
   );
+
+  // Organization deletion dialog states
+  const [showDeleteConfirmation, setShowDeleteConfirmation] =
+    useState(false);
+  const [showPasswordDialog, setShowPasswordDialog] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [removedOrganization, setRemovedOrganization] = useState(false);
 
   useEffect(() => {
     setRemovedMemberIds(new Set());
@@ -129,16 +143,12 @@ export default function OrganizationSettings() {
 
   const currentUserId = user?._id ?? user?.id ?? "";
 
-  // Combine members, memberships, and admin.
-  // Use MongoDB _id to avoid duplicate users.
   const members = useMemo<OrganizationMembership[]>(() => {
     if (!organization) return [];
 
     const membersMap = new Map<string, OrganizationMembership>();
-
     const adminId = getMemberId(organization.admin);
 
-    // 1. Add users from memberships first so their roles are preserved.
     for (const membership of organization.memberships ?? []) {
       const memberId = getMemberId(membership.user);
 
@@ -150,7 +160,6 @@ export default function OrganizationSettings() {
       });
     }
 
-    // 2. Add users from the members array.
     for (const member of organization.members ?? []) {
       const memberId = getMemberId(member);
 
@@ -159,7 +168,6 @@ export default function OrganizationSettings() {
       const existingMembership = membersMap.get(memberId);
 
       if (existingMembership) {
-        // Prefer populated user details over a plain MongoDB ID.
         if (
           typeof existingMembership.user === "string" &&
           typeof member !== "string"
@@ -175,14 +183,10 @@ export default function OrganizationSettings() {
 
       membersMap.set(memberId, {
         user: member,
-        role:
-          memberId === adminId
-            ? "Owner"
-            : "Member",
+        role: memberId === adminId ? "Owner" : "Member",
       });
     }
 
-    // 3. Make sure the organization admin is included.
     if (organization.admin && adminId) {
       const existingMembership = membersMap.get(adminId);
 
@@ -228,6 +232,9 @@ export default function OrganizationSettings() {
     currentRole === "Admin" ||
     isOrganizationAdmin;
 
+  // Only the actual organization owner can delete.
+  const canDeleteOrganization = isOrganizationAdmin;
+
   const {
     data: outgoingData,
     isLoading: isLoadingOutgoing,
@@ -255,6 +262,11 @@ export default function OrganizationSettings() {
 
   const [acceptInvitation, { isLoading: isAccepting }] =
     useAcceptOrganizationInvitationMutation();
+
+  const [deleteOrganization, { isLoading: isDeletingOrganization }] =
+    useDeleteOrganizationMutation();
+
+  const [getOrganizations] = useLazyGetOrganizationsQuery();
 
   useEffect(() => {
     if (organization) {
@@ -398,7 +410,6 @@ export default function OrganizationSettings() {
       }).unwrap();
 
       await refetchOrganization();
-
       setNotice("Member role updated.");
     } catch (error: unknown) {
       setErrorMessage(
@@ -480,7 +491,79 @@ export default function OrganizationSettings() {
     }
   }
 
-  if (!selectedOrganization) {
+  function openDeleteConfirmation() {
+    setDeleteError("");
+    setDeletePassword("");
+    setShowDeleteConfirmation(true);
+  }
+
+  function closeDeleteDialogs() {
+    if (isDeletingOrganization) return;
+
+    setShowDeleteConfirmation(false);
+    setShowPasswordDialog(false);
+    setDeletePassword("");
+    setDeleteError("");
+  }
+
+  async function handleDeleteOrganization(
+    event: React.FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+
+    if (!deletePassword.trim()) {
+      setDeleteError("Please enter your account password.");
+      return;
+    }
+
+    setDeleteError("");
+
+    try {
+      await deleteOrganization({
+        orgId,
+        password: deletePassword,
+      }).unwrap();
+
+      setRemovedOrganization(true);
+      setShowPasswordDialog(false);
+      setShowDeleteConfirmation(false);
+      setDeletePassword("");
+
+      try {
+        const response = await getOrganizations().unwrap();
+        const remainingOrganizations = response.organizations ?? [];
+
+        if (remainingOrganizations.length > 0) {
+          const nextOrganization = remainingOrganizations[0];
+
+          dispatch(
+            setSelectedOrganization({
+              _id: nextOrganization._id,
+              org_id: nextOrganization.org_id,
+              org_name: nextOrganization.org_name,
+            })
+          );
+
+          navigate("/dashboard", { replace: true });
+        } else {
+          dispatch(logout());
+          navigate("/login", { replace: true });
+        }
+      } catch {
+        dispatch(logout());
+        navigate("/login", { replace: true });
+      }
+    } catch (error: unknown) {
+      setDeleteError(
+        getFailureMessage(
+          error,
+          "Could not delete the organization. Please try again."
+        )
+      );
+    }
+  }
+
+  if (!selectedOrganization || removedOrganization) {
     return (
       <div className="min-h-screen bg-slate-50">
         <Navbar />
@@ -565,22 +648,14 @@ export default function OrganizationSettings() {
           Back to workspace
         </button>
 
-        <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
-              Organization settings
-            </h1>
+        <div className="mb-8">
+          <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
+            Organization settings
+          </h1>
 
-            <p className="mt-2 text-slate-500">
-              Manage workspace identity and access.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-600">
-              {organization?.org_name ?? selectedOrganization.org_name}
-            </div>
-          </div>
+          <p className="mt-2 text-slate-500">
+            Manage workspace identity and access.
+          </p>
         </div>
 
         {notice && (
@@ -659,101 +734,124 @@ export default function OrganizationSettings() {
 
             <section className="space-y-5">
               {tab === "General" && (
-                <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-4">
-                    <div>
-                      <h2 className="text-lg font-semibold text-slate-900">
-                        Organization name
-                      </h2>
+                <>
+                  <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-4">
+                      <div>
+                        <h2 className="text-lg font-semibold text-slate-900">
+                          Organization name
+                        </h2>
 
-                      <p className="mt-1 text-sm text-slate-500">
-                        The name shown to everyone in this workspace.
-                      </p>
-                    </div>
+                        <p className="mt-1 text-sm text-slate-500">
+                          The name shown to everyone in this workspace.
+                        </p>
+                      </div>
 
-                    {canManage && (
-                      <div className="flex flex-wrap items-center gap-2">
-                        {!isEditingOrgName && (
+                      {canManage && (
+                        <div className="flex flex-wrap items-center gap-2">
+                          {!isEditingOrgName && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOrgName(organization?.org_name ?? "");
+                                setIsEditingOrgName(true);
+                              }}
+                              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                            >
+                              Edit organization name
+                            </button>
+                          )}
+
                           <button
                             type="button"
+                            onClick={() => navigate("/projects/create")}
+                            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
+                          >
+                            <Plus size={17} />
+                            Create New Project
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {isEditingOrgName ? (
+                      <form
+                        onSubmit={handleSave}
+                        className="mt-5 space-y-4"
+                      >
+                        <label className="block space-y-1.5 text-sm font-medium text-slate-700">
+                          Organization name
+
+                          <input
+                            value={orgName}
+                            onChange={(event) =>
+                              setOrgName(event.target.value)
+                            }
+                            maxLength={100}
+                            required
+                            disabled={isSaving}
+                            autoFocus
+                            className="w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50"
+                            placeholder="Acme Technologies"
+                          />
+                        </label>
+
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            disabled={isSaving}
                             onClick={() => {
                               setOrgName(organization?.org_name ?? "");
-                              setIsEditingOrgName(true);
+                              setIsEditingOrgName(false);
                             }}
-                            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                           >
-                            Edit organization name
+                            Cancel
                           </button>
-                        )}
 
-                        <button
-                          type="button"
-                          onClick={() => navigate("/projects/create")}
-                          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
-                        >
-                          <Plus size={17} />
-                          Create New Project
-                        </button>
-                      </div>
+                          <button
+                            type="submit"
+                            disabled={isSaving}
+                            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                          >
+                            {isSaving ? "Saving…" : "Save"}
+                          </button>
+                        </div>
+                      </form>
+                    ) : (
+                      <p className="mt-5 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-base font-medium text-slate-900">
+                        {organization?.org_name ?? selectedOrganization.org_name}
+                      </p>
+                    )}
+
+                    {!canManage && (
+                      <p className="mt-3 text-sm text-slate-500">
+                        Only organization Owners and Admins can edit this name.
+                      </p>
                     )}
                   </div>
 
-                  {isEditingOrgName ? (
-                    <form
-                      onSubmit={handleSave}
-                      className="mt-5 space-y-4"
-                    >
-                      <label className="block space-y-1.5 text-sm font-medium text-slate-700">
-                        Organization name
+                  {canDeleteOrganization && (
+                    <div className="rounded-xl border border-rose-200 bg-white p-6 shadow-sm">
+                      <h2 className="text-lg font-semibold text-slate-900">
+                        Delete organization
+                      </h2>
 
-                        <input
-                          value={orgName}
-                          onChange={(event) =>
-                            setOrgName(event.target.value)
-                          }
-                          maxLength={100}
-                          required
-                          disabled={isSaving}
-                          autoFocus
-                          className="w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50"
-                          placeholder="Acme Technologies"
-                        />
-                      </label>
+                      <p className="mt-1 text-sm text-slate-500">
+                        Permanently delete this organization, its projects, and its tasks. This action cannot be undone.
+                      </p>
 
-                      <div className="flex justify-end gap-2">
-                        <button
-                          type="button"
-                          disabled={isSaving}
-                          onClick={() => {
-                            setOrgName(organization?.org_name ?? "");
-                            setIsEditingOrgName(false);
-                          }}
-                          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                        >
-                          Cancel
-                        </button>
-
-                        <button
-                          type="submit"
-                          disabled={isSaving}
-                          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
-                        >
-                          {isSaving ? "Saving…" : "Save"}
-                        </button>
-                      </div>
-                    </form>
-                  ) : (
-                    <p className="mt-5 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-base font-medium text-slate-900">
-                      {organization?.org_name ?? selectedOrganization.org_name}
-                    </p>
+                      <button
+                        type="button"
+                        onClick={openDeleteConfirmation}
+                        className="mt-5 inline-flex items-center gap-2 rounded-lg border border-rose-300 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
+                      >
+                        <Trash2 size={16} />
+                        Delete organization
+                      </button>
+                    </div>
                   )}
-
-                  {!canManage && (
-                    <p className="mt-3 text-sm text-slate-500">
-                      Only organization Owners and Admins can edit this name.
-                    </p>
-                  )}
-                </div>
+                </>
               )}
 
               {tab === "Members" && (
@@ -1049,6 +1147,179 @@ export default function OrganizationSettings() {
           </div>
         )}
       </main>
+
+      {/* First dialog: confirm organization deletion */}
+      {showDeleteConfirmation && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 px-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeDeleteDialogs();
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-organization-title"
+            className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-rose-100 text-rose-600">
+                  <AlertTriangle size={20} />
+                </div>
+
+                <h2
+                  id="delete-organization-title"
+                  className="text-lg font-semibold text-slate-900"
+                >
+                  Delete organization?
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeDeleteDialogs}
+                className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Close dialog"
+              >
+                <X size={19} />
+              </button>
+            </div>
+
+            <p className="mt-4 text-sm leading-6 text-slate-600">
+              Are you sure you want to delete the organization{" "}
+              <strong className="text-slate-900">
+                {organization?.org_name ?? selectedOrganization.org_name}
+              </strong>
+              ?
+            </p>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={closeDeleteDialogs}
+                className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDeleteConfirmation(false);
+                  setDeleteError("");
+                  setDeletePassword("");
+                  setShowPasswordDialog(true);
+                }}
+                className="rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rose-700"
+              >
+                Yes, Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Second dialog: verify current account password */}
+      {showPasswordDialog && (
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 px-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeDeleteDialogs();
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="verify-password-title"
+            className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2
+                  id="verify-password-title"
+                  className="text-lg font-semibold text-slate-900"
+                >
+                  Confirm your password
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Enter your current account password to permanently delete this organization.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeDeleteDialogs}
+                disabled={isDeletingOrganization}
+                className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
+                aria-label="Close dialog"
+              >
+                <X size={19} />
+              </button>
+            </div>
+
+            <form onSubmit={handleDeleteOrganization} className="mt-5">
+              <label
+                htmlFor="delete-account-password"
+                className="mb-2 block text-sm font-medium text-slate-700"
+              >
+                Current password
+              </label>
+
+              <input
+                id="delete-account-password"
+                type="password"
+                value={deletePassword}
+                onChange={(event) => {
+                  setDeletePassword(event.target.value);
+                  setDeleteError("");
+                }}
+                autoComplete="current-password"
+                required
+                autoFocus
+                disabled={isDeletingOrganization}
+                placeholder="Enter your current password"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50"
+              />
+
+              {deleteError && (
+                <p role="alert" className="mt-2 text-sm text-rose-600">
+                  {deleteError}
+                </p>
+              )}
+
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPasswordDialog(false);
+                    setShowDeleteConfirmation(true);
+                    setDeletePassword("");
+                    setDeleteError("");
+                  }}
+                  disabled={isDeletingOrganization}
+                  className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Back
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={isDeletingOrganization || !deletePassword.trim()}
+                  className="rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isDeletingOrganization ? "Deleting…" : "Confirm Delete"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

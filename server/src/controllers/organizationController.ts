@@ -11,6 +11,8 @@ import TaskCounter from "../models/taskCounter.js";
 
 import { sendOrganizationInvitationEmail } from "../services/emailService.js";
 import type { OrganizationRole } from "../models/Organization.js";
+import bcrypt from "bcryptjs";
+import Task from "../models/task.js";
 
 // --------------------------------------------------
 // HELPERS
@@ -1461,6 +1463,130 @@ export const getOrganizationById = async (
 
     return res.status(500).json({
       message: "Failed to get organization",
+      error:
+        error instanceof Error
+          ? error.message
+          : "Unknown error",
+    });
+  }
+};
+
+// --------------------------------------------------
+// DELETE ORGANIZATION
+// --------------------------------------------------
+
+export const deleteOrganization = async (
+  req: Request,
+  res: Response
+) => {
+  try {
+    const org_id = routeParam(req.params.org_id);
+    const userId = (req as any).userId;
+
+    const password =
+      typeof req.body.password === "string"
+        ? req.body.password
+        : "";
+
+    if (!userId) {
+      return res.status(401).json({
+        message: "User not authenticated",
+      });
+    }
+
+    if (!org_id) {
+      return res.status(400).json({
+        message: "Organization ID is required",
+      });
+    }
+
+    if (!password.trim()) {
+      return res.status(400).json({
+        message: "Current password is required",
+      });
+    }
+
+    // Find the organization.
+    const organization = await Organization.findOne({ org_id });
+
+    if (!organization) {
+      return res.status(404).json({
+        message: "Organization not found",
+      });
+    }
+
+    // Only the actual organization Owner can delete it.
+    if (organization.admin?.toString() !== userId.toString()) {
+      return res.status(403).json({
+        message: "Only the organization Owner can delete this organization",
+      });
+    }
+
+    // Fetch the logged-in user's password hash.
+    const user = await User.findById(userId).select("+password");
+
+    if (!user || !user.password) {
+      return res.status(404).json({
+        message: "User account not found",
+      });
+    }
+
+    // Verify the current account password.
+    const isPasswordCorrect = await bcrypt.compare(
+      password,
+      user.password
+    );
+
+    if (!isPasswordCorrect) {
+      return res.status(401).json({
+        message: "Incorrect password. Please try again.",
+      });
+    }
+
+    // Find all projects belonging to this organization.
+    const projects = await Project.find({
+      organization: org_id,
+    }).select("_id");
+
+    const projectIds = projects.map((project) => project._id);
+
+    // Delete related tasks.
+    await Task.deleteMany({
+      $or: [
+        { organization: org_id },
+        { project: { $in: projectIds } },
+      ],
+    });
+
+    // Delete task counters belonging to those projects.
+    await TaskCounter.deleteMany({
+      _id: {
+        $in: projectIds.map((id) => id.toString()),
+      },
+    });
+
+    // Delete organization projects.
+    await Project.deleteMany({
+      organization: org_id,
+    });
+
+    // Delete all invitations belonging to this organization.
+    await OrganizationInvitation.deleteMany({
+      organizationId: org_id,
+    });
+
+    // Finally, delete the organization itself.
+    await organization.deleteOne();
+
+    return res.status(200).json({
+      message: "Organization deleted successfully",
+      deletedOrganizationId: org_id,
+    });
+  } catch (error) {
+    console.error("DELETE ORGANIZATION ERROR:", error);
+
+    return res.status(500).json({
+      message: "Failed to delete organization",
       error:
         error instanceof Error
           ? error.message

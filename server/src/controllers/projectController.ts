@@ -92,6 +92,43 @@ function getOrganizationRole(
   return "Member";
 }
 
+// Automatically include the project creator and organization Owner
+// in the project members array.
+//
+// This also updates existing projects when they are accessed.
+async function ensureDefaultProjectMembers(
+  project: any,
+  organization: any
+): Promise<void> {
+  const defaultMemberIds = [
+    project.owner?.toString(),
+    organization.admin?.toString(),
+  ].filter((id): id is string => Boolean(id));
+
+  const existingMemberIds = new Set(
+    project.members.map((member: mongoose.Types.ObjectId) =>
+      member.toString()
+    )
+  );
+
+  let changed = false;
+
+  for (const memberId of defaultMemberIds) {
+    if (!existingMemberIds.has(memberId)) {
+      project.members.push(
+        new mongoose.Types.ObjectId(memberId)
+      );
+
+      existingMemberIds.add(memberId);
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    await project.save();
+  }
+}
+
 // Check whether a user can manage a project.
 // The project owner and organization Owner/Admin can manage it.
 async function canManageProject(
@@ -162,6 +199,7 @@ async function updateProjectTaskKeys(
 /* --------------------------------------------------
    CREATE PROJECT
 -------------------------------------------------- */
+
 export const createProject = async (
   req: Request,
   res: Response
@@ -248,21 +286,36 @@ export const createProject = async (
       });
     }
 
+    // Automatically add:
+    // 1. The project creator.
+    // 2. The organization Owner.
+    //
+    // Set removes duplicate IDs if both users are the same.
+    const defaultMembers = [
+      userId.toString(),
+      selectedOrganization.admin.toString(),
+    ];
+
+    const projectMembers = [
+      ...new Set(defaultMembers),
+    ].map((memberId) => new mongoose.Types.ObjectId(memberId));
+
     const project = await Project.create({
       name: name.trim(),
       key: projectKey,
       description: description?.trim() ?? "",
       organization: selectedOrganization.org_id,
       owner: userId,
-
-      // A new project starts with no members.
-      // Members must be explicitly added by the project owner.
-      members: [],
+      members: projectMembers,
     });
+
+    const populatedProject = await Project.findById(project._id)
+      .populate("owner", "name email")
+      .populate("members", "name email");
 
     return res.status(201).json({
       message: "Project created successfully",
-      project,
+      project: populatedProject,
     });
   } catch (error) {
     console.error("CREATE PROJECT ERROR:", error);
@@ -350,7 +403,6 @@ export const getProjects = async (
     };
 
     const projects = await Project.find(projectFilter)
-      .populate("owner", "name email")
       .sort({ createdAt: -1 });
 
     const organizationNames = new Map<string, string>();
@@ -372,12 +424,26 @@ export const getProjects = async (
 
     const projectsWithOrganizationNames = await Promise.all(
       projects.map(async (project) => {
+        // Add creator and organization Owner to existing projects too.
+        await ensureDefaultProjectMembers(project, organization);
+
         if (!project.key) {
           project.key = await getUniqueProjectKey(project.name);
           await project.save();
         }
 
-        const projectData = project.toObject();
+        const populatedProject = await project.populate([
+          {
+            path: "owner",
+            select: "name email",
+          },
+          {
+            path: "members",
+            select: "name email",
+          },
+        ]);
+
+        const projectData = populatedProject.toObject();
 
         const organizationValue = project.organization
           .trim()
@@ -451,6 +517,12 @@ export const getProjectById = async (
       return res.status(403).json({
         message: "You do not have access to this project",
       });
+    }
+
+    const organization = await getProjectOrganization(project);
+
+    if (organization) {
+      await ensureDefaultProjectMembers(project, organization);
     }
 
     const populatedProject = await project.populate([
@@ -537,6 +609,9 @@ export const updateProject = async (
         message: "Project organization not found",
       });
     }
+
+    // Ensure creator and organization Owner are project members.
+    await ensureDefaultProjectMembers(project, organization);
 
     // UPDATE PROJECT NAME
     if (name !== undefined) {
@@ -812,6 +887,8 @@ export const addProjectMember = async (
       });
     }
 
+    await ensureDefaultProjectMembers(project, organization);
+
     const isOrganizationMember = organization.members.some(
       (member) => member.toString() === newMemberId
     );
@@ -845,9 +922,13 @@ export const addProjectMember = async (
 
     await project.save();
 
+    const updatedProject = await Project.findById(project._id)
+      .populate("owner", "name email")
+      .populate("members", "name email");
+
     return res.status(200).json({
       message: "Project member added successfully",
-      project,
+      project: updatedProject,
     });
   } catch (error) {
     console.error("ADD PROJECT MEMBER ERROR:", error);
@@ -905,6 +986,12 @@ export const getProjectMembers = async (
         message:
           "You do not have access to this project's members",
       });
+    }
+
+    const organization = await getProjectOrganization(project);
+
+    if (organization) {
+      await ensureDefaultProjectMembers(project, organization);
     }
 
     const populatedProject = await project.populate(
@@ -974,9 +1061,28 @@ export const removeProjectMember = async (
       });
     }
 
-    if (project.owner.toString() === memberId) {
+    const organization = await getProjectOrganization(project);
+
+    if (!organization) {
+      return res.status(404).json({
+        message: "Project organization not found",
+      });
+    }
+
+    await ensureDefaultProjectMembers(project, organization);
+
+    // Neither the project owner nor the organization Owner
+    // can be removed from the project members list.
+    const isOrganizationOwner =
+      organization.admin?.toString() === memberId;
+
+    if (
+      project.owner.toString() === memberId ||
+      isOrganizationOwner
+    ) {
       return res.status(400).json({
-        message: "The project owner cannot be removed",
+        message:
+          "The project owner and organization Owner cannot be removed from project members",
       });
     }
 
@@ -991,10 +1097,18 @@ export const removeProjectMember = async (
     }
 
     // Check whether this member has unfinished assigned tasks.
-    // Explicit filter typing avoids the Mongoose overload error.
+    const projectIdString = Array.isArray(id) ? id[0] : id;
+    const memberIdString = Array.isArray(memberId) ? memberId[0] : memberId;
+
+    if (!projectIdString || !memberIdString) {
+      return res.status(400).json({
+        message: "Invalid project or member ID",
+      });
+    }
+
     const taskFilter: any = {
-      project: new mongoose.Types.ObjectId(Array.isArray(id) ? id[0] : id),
-      assignee: new mongoose.Types.ObjectId(Array.isArray(memberId) ? memberId[0] : memberId),
+      project: new mongoose.Types.ObjectId(projectIdString),
+      assignee: new mongoose.Types.ObjectId(memberIdString),
       status: { $ne: "Done" },
     };
 

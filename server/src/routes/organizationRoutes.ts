@@ -1,4 +1,3 @@
-
 import express from "express";
 import {
   createOrganization,
@@ -15,22 +14,18 @@ import {
   acceptOrganizationInvitation,
   acceptOrganizationInvitationByToken,
   revokeOrganizationInvitation,
+  deleteOrganization,
 } from "../controllers/organizationController.js";
 
 import authMiddleware from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// Create an organization without a first project (existing endpoint)
 router.post("/", authMiddleware, createOrganization);
-
-// Create an organization along with its first project
 router.post("/setup", authMiddleware, createOrganizationWithFirstProject);
 
-// Get all organizations of the logged-in user
 router.get("/", authMiddleware, getMyOrganizations);
 
-// Organization invitations
 router.get("/invitations", authMiddleware, getMyOrganizationInvitations);
 router.post(
   "/invitations/accept-token",
@@ -43,10 +38,8 @@ router.patch(
   acceptOrganizationInvitation
 );
 
-// Update organization
 router.patch("/:org_id", authMiddleware, updateOrganization);
 
-// Organization members
 router.post("/:org_id/members", authMiddleware, addMember);
 router.patch(
   "/:org_id/members/:memberId",
@@ -59,16 +52,25 @@ router.delete(
   removeOrganizationMember
 );
 
-// Organization-specific invitations
-router.get("/:org_id/invitations", authMiddleware, getOrganizationInvitations);
-router.post("/:org_id/invitations", authMiddleware, createOrganizationInvitation);
+router.get(
+  "/:org_id/invitations",
+  authMiddleware,
+  getOrganizationInvitations
+);
+router.post(
+  "/:org_id/invitations",
+  authMiddleware,
+  createOrganizationInvitation
+);
 router.delete(
   "/:org_id/invitations/:invitationId",
   authMiddleware,
   revokeOrganizationInvitation
 );
 
-// Get organization by ID
+// Delete organization. Keep this before the GET /:org_id route.
+router.delete("/:org_id", authMiddleware, deleteOrganization);
+
 router.get("/:org_id", authMiddleware, getOrganizationById);
 
 export default router;
