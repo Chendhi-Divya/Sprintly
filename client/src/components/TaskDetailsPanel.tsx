@@ -1,3 +1,4 @@
+
 import { useEffect, useRef, useState } from "react";
 import { useSelector } from "react-redux";
 import type { RootState } from "../store/store";
@@ -11,7 +12,6 @@ import {
   Paperclip,
   MessageSquare,
   Send,
-  Check,
   Plus,
   ChevronDown,
   Copy,
@@ -131,6 +131,10 @@ export default function TaskDetailsPanel({
     (state: RootState) => state.auth.selectedOrganization
   );
 
+  const authToken = useSelector(
+    (state: RootState) => state.auth.token
+  );
+
   const organizationCode = selectedOrganization?.org_id ?? "";
 
   const {
@@ -188,6 +192,10 @@ export default function TaskDetailsPanel({
   const [showEpicInput, setShowEpicInput] = useState(false);
   const epicDropdownRef = useRef<HTMLDivElement>(null);
 
+  // Attachment delete confirmation
+  const [attachmentToDelete, setAttachmentToDelete] =
+    useState<TaskAttachment | null>(null);
+
   const [toast, setToast] = useState<{
     text: string;
     type: ToastType;
@@ -239,6 +247,13 @@ export default function TaskDetailsPanel({
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
+        if (attachmentToDelete) {
+          if (!isDeletingAttachment) {
+            setAttachmentToDelete(null);
+          }
+          return;
+        }
+
         if (showEpicInput) {
           setShowEpicInput(false);
           return;
@@ -253,7 +268,12 @@ export default function TaskDetailsPanel({
     return () => {
       window.removeEventListener("keydown", handleEscape);
     };
-  }, [onClose, showEpicInput]);
+  }, [
+    onClose,
+    showEpicInput,
+    attachmentToDelete,
+    isDeletingAttachment,
+  ]);
 
   if (isLoading && !task) {
     return (
@@ -433,7 +453,7 @@ export default function TaskDetailsPanel({
     }
   }
 
-  // Assign or change or remove selected Epic
+  // Assign, change, or remove selected Epic
   async function handleSelectEpic(selectedEpicId: string) {
     if (isSaving) return;
 
@@ -530,18 +550,19 @@ export default function TaskDetailsPanel({
     }
   }
 
-  async function handleDeleteAttachment(attachment: TaskAttachment) {
-    if (!window.confirm(`Delete “${getAttachmentName(attachment)}”?`)) {
-      return;
-    }
+  // Delete attachment after in-page confirmation
+  async function handleDeleteAttachment() {
+    if (!attachmentToDelete || isDeletingAttachment) return;
 
     try {
       await deleteTaskAttachment({
         taskId,
-        attachmentId: attachment.fileId,
+        attachmentId: attachmentToDelete.fileId,
       }).unwrap();
 
       await refetchTask();
+
+      setAttachmentToDelete(null);
       showToast("Attachment deleted successfully.");
     } catch (error: unknown) {
       showToast(
@@ -551,8 +572,48 @@ export default function TaskDetailsPanel({
     }
   }
 
+  // Open attachment
+  async function handleOpenAttachment(attachment: TaskAttachment) {
+    const newTab = window.open("about:blank", "_blank");
+
+    if (!newTab) {
+      showToast("Allow pop-ups to open this attachment.", "error");
+      return;
+    }
+
+    try {
+      const token = authToken || localStorage.getItem("token");
+
+      const response = await fetch(attachment.url, {
+        credentials: "include",
+        headers: token
+          ? { Authorization: `Bearer ${token}` }
+          : undefined,
+      });
+
+      if (!response.ok) {
+        throw new Error("Unable to load this attachment.");
+      }
+
+      const fileUrl = URL.createObjectURL(await response.blob());
+
+      newTab.location.href = fileUrl;
+
+      window.setTimeout(() => URL.revokeObjectURL(fileUrl), 60_000);
+    } catch (error: unknown) {
+      newTab.close();
+
+      showToast(
+        getFailureMessage(error, "Unable to open this attachment."),
+        "error"
+      );
+    }
+  }
+
+  // Copy task link
   async function copyTaskLink() {
     const taskUrl = new URL("/dashboard", window.location.origin);
+
     taskUrl.searchParams.set("taskId", taskId);
 
     try {
@@ -582,15 +643,11 @@ export default function TaskDetailsPanel({
             role="status"
             className={`absolute right-4 top-4 z-[70] flex max-w-[calc(100%-2rem)] items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium shadow-lg ${
               toast.type === "success"
-  ? "bg-gray-800 text-white"
-  : "bg-red-600 text-white"
+                ? "bg-gray-800 text-white"
+                : "bg-red-600 text-white"
             }`}
           >
-            {toast.type === "success" ? (
-              <Check size={16} />
-            ) : (
-              <X size={16} />
-            )}
+            {toast.type === "error" && <X size={16} />}
 
             <span>{toast.text}</span>
 
@@ -604,96 +661,141 @@ export default function TaskDetailsPanel({
           </div>
         )}
 
-       {/* Header */}
-<div className="relative z-30 flex shrink-0 items-center justify-between gap-4 border-b border-gray-200 px-6 py-5 sm:px-8">
-  {/* Left side: Add Epic or selected parent task number */}
-  <div className="flex min-w-0 items-center gap-3">
-    {currentParent ? (
-      <div className="group flex items-center gap-1">
-        <span className="text-sm font-semibold text-blue-600">
-          {currentParent.taskKey ?? "Epic"}
-        </span>
-        <button
-          type="button"
-          onClick={() => void copyTaskLink()}
-          className="rounded p-1 text-gray-400 opacity-0 transition hover:bg-blue-50 hover:text-blue-600 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-blue-400 group-hover:opacity-100"
-          aria-label="Copy link to this task"
-          title="Copy task link"
-        >
-          <Copy size={14} />
-        </button>
-      </div>
-    ) : (
-      task.type !== "Epic" && (
-        <div
-          ref={epicDropdownRef}
-          className="relative shrink-0"
-        >
-          <button
-            type="button"
-            onClick={() =>
-              setShowEpicInput((previous) => !previous)
-            }
-            className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${
-              showEpicInput
-                ? "border-blue-200 bg-blue-50 text-blue-600"
-                : "border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
-            }`}
-          >
-            Add Epic
-            <ChevronDown size={15} />
-          </button>
+        {/* Delete attachment confirmation */}
+        {attachmentToDelete && (
+          <div className="absolute inset-0 z-[80] flex items-center justify-center bg-black/40 p-4">
+            <div
+              className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <h3 className="text-lg font-semibold text-gray-900">
+                Delete attachment?
+              </h3>
 
-          {/* Epic list appears only after clicking Add Epic */}
-          {showEpicInput && (
-            <div className="absolute left-0 top-full z-50 mt-2 w-[min(340px,calc(100vw-2rem))] rounded-xl border border-gray-200 bg-white p-3 shadow-xl">
-              <p className="mb-3 px-2 text-sm font-semibold text-gray-700">
-                Select your Epic
+              <p className="mt-3 break-words text-sm leading-6 text-gray-600">
+                Are you sure you want to delete{" "}
+                <span className="font-semibold text-gray-800">
+                  "{getAttachmentName(attachmentToDelete)}"
+                </span>
+                ?
               </p>
 
-              {isLoadingTasks ? (
-                <p className="px-2 py-3 text-sm text-gray-400">
-                  Loading Epic tasks...
-                </p>
-              ) : availableEpics.length === 0 ? (
-                <p className="px-2 py-3 text-sm text-gray-400">
-                  No Epic tasks available in this project.
-                </p>
-              ) : (
-                <div className="max-h-64 space-y-1 overflow-y-auto">
-                  {availableEpics.map((epic) => (
-                    <button
-                      key={epic._id}
-                      type="button"
-                      disabled={isSaving}
-                      onClick={() =>
-                        void handleSelectEpic(epic._id)
-                      }
-                      className="flex w-full items-center rounded-lg px-3 py-2.5 text-left transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <span className="w-full truncate text-sm font-medium text-gray-700">
-                        {epic.title}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )
-    )}
-  </div>
+              <p className="mt-1 text-sm text-gray-500">
+                This action cannot be undone.
+              </p>
 
-  {/* Close button */}
-  <button
-    onClick={onClose}
-    className="shrink-0 rounded-lg p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-900"
-    aria-label="Close task details"
-  >
-    <X size={20} />
-  </button>
-</div>
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setAttachmentToDelete(null)}
+                  disabled={isDeletingAttachment}
+                  className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => void handleDeleteAttachment()}
+                  disabled={isDeletingAttachment}
+                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isDeletingAttachment ? "Deleting..." : "Delete"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Header */}
+        <div className="relative z-30 flex shrink-0 items-center justify-between gap-4 border-b border-gray-200 px-6 py-5 sm:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            {currentParent ? (
+              <div className="group flex items-center gap-1">
+                <span className="text-sm font-semibold text-blue-600">
+                  {currentParent.taskKey ?? "Epic"}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => void copyTaskLink()}
+                  className="rounded p-1 text-gray-400 opacity-0 transition hover:bg-blue-50 hover:text-blue-600 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-blue-400 group-hover:opacity-100"
+                  aria-label="Copy link to this task"
+                  title="Copy task link"
+                >
+                  <Copy size={14} />
+                </button>
+              </div>
+            ) : (
+              task.type !== "Epic" && (
+                <div
+                  ref={epicDropdownRef}
+                  className="relative shrink-0"
+                >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setShowEpicInput((previous) => !previous)
+                    }
+                    className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                      showEpicInput
+                        ? "border-blue-200 bg-blue-50 text-blue-600"
+                        : "border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
+                    }`}
+                  >
+                    Add Epic
+                    <ChevronDown size={15} />
+                  </button>
+
+                  {showEpicInput && (
+                    <div className="absolute left-0 top-full z-50 mt-2 w-[min(340px,calc(100vw-2rem))] rounded-xl border border-gray-200 bg-white p-3 shadow-xl">
+                      <p className="mb-3 px-2 text-sm font-semibold text-gray-700">
+                        Select your Epic
+                      </p>
+
+                      {isLoadingTasks ? (
+                        <p className="px-2 py-3 text-sm text-gray-400">
+                          Loading Epic tasks...
+                        </p>
+                      ) : availableEpics.length === 0 ? (
+                        <p className="px-2 py-3 text-sm text-gray-400">
+                          No Epic tasks available in this project.
+                        </p>
+                      ) : (
+                        <div className="max-h-64 space-y-1 overflow-y-auto">
+                          {availableEpics.map((epic) => (
+                            <button
+                              key={epic._id}
+                              type="button"
+                              disabled={isSaving}
+                              onClick={() =>
+                                void handleSelectEpic(epic._id)
+                              }
+                              className="flex w-full items-center rounded-lg px-3 py-2.5 text-left transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <span className="w-full truncate text-sm font-medium text-gray-700">
+                                {epic.title}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            )}
+          </div>
+
+          <button
+            onClick={onClose}
+            className="shrink-0 rounded-lg p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-900"
+            aria-label="Close task details"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
         {/* Main content */}
         <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_320px]">
           {/* Left section */}
@@ -825,9 +927,11 @@ export default function TaskDetailsPanel({
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <Paperclip size={18} className="text-gray-500" />
+
                   <h3 className="text-base font-semibold text-gray-900">
                     Attachments
                   </h3>
+
                   <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500">
                     {attachments.length}
                   </span>
@@ -860,11 +964,13 @@ export default function TaskDetailsPanel({
                         key={attachment._id}
                         className="flex min-w-0 items-center gap-2 rounded-xl border border-gray-200 bg-white p-3 transition hover:border-blue-300 hover:bg-blue-50/40"
                       >
-                        <a
-                          href={attachment.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex min-w-0 flex-1 items-center gap-3"
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void handleOpenAttachment(attachment)
+                          }
+                          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                          aria-label={`Open ${getAttachmentName(attachment)}`}
                         >
                           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
                             {isImage ? (
@@ -895,11 +1001,12 @@ export default function TaskDetailsPanel({
                               ) : null}
                             </div>
                           </div>
-                        </a>
+                        </button>
+
                         <button
                           type="button"
                           onClick={() =>
-                            void handleDeleteAttachment(attachment)
+                            setAttachmentToDelete(attachment)
                           }
                           disabled={isDeletingAttachment}
                           className="shrink-0 rounded-lg p-2 text-gray-400 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
@@ -970,6 +1077,7 @@ export default function TaskDetailsPanel({
             <section>
               <div className="mb-4 flex items-center gap-2">
                 <MessageSquare size={18} className="text-gray-500" />
+
                 <h3 className="text-base font-semibold text-gray-900">
                   Activity
                 </h3>
@@ -1140,7 +1248,11 @@ export default function TaskDetailsPanel({
                     onChange={(event) =>
                       void handleSelectEpic(event.target.value)
                     }
-                    disabled={isLoadingTasks || isSaving || task.type === "Epic"}
+                    disabled={
+                      isLoadingTasks ||
+                      isSaving ||
+                      task.type === "Epic"
+                    }
                     className={`${inputClass} appearance-none pr-10`}
                   >
                     <option value="">
