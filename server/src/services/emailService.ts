@@ -145,7 +145,10 @@ export const sendOrganizationInvitationEmail = async (
   inviteToken: string
 ) => {
   const clientUrl =
-    process.env.CLIENT_URL || "http://localhost:5173";
+    process.env.CLIENT_URL ||
+    (process.env.NODE_ENV === "production"
+      ? "https://sprintly-gamma.vercel.app"
+      : "http://localhost:5173");
 
   const invitationBaseUrl =
     process.env.INVITATION_ACCEPT_URL ||
