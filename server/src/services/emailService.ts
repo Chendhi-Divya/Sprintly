@@ -152,18 +152,25 @@ export const sendOrganizationInvitationEmail = async (
 
   const invitationBaseUrl =
     process.env.INVITATION_ACCEPT_URL ||
-    `${clientUrl.replace(/\/$/, "")}/accept-invitation`;
+    `${clientUrl.replace(/\/+$/, "")}/accept-invitation`;
 
-  const separator = invitationBaseUrl.includes("?") ? "&" : "?";
+  // Add invitation token to the frontend URL
+  const invitationUrl = new URL(invitationBaseUrl);
 
-  const invitationLink =
-    `${invitationBaseUrl}${separator}token=${encodeURIComponent(inviteToken)}`;
+  invitationUrl.searchParams.set("token", inviteToken);
 
-  const subject =
-    `Invitation to join ${organizationName} on Sprintly`;
+  const invitationLink = invitationUrl.toString();
+
+  const subject = `Invitation to join ${organizationName} on Sprintly`;
 
   const html = `
-    <div style="font-family: Arial, sans-serif; padding: 20px;">
+    <div style="
+      font-family: Arial, sans-serif;
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 24px;
+      color: #333;
+    ">
       <h2>You're invited to Sprintly!</h2>
 
       <p>
@@ -172,23 +179,32 @@ export const sendOrganizationInvitationEmail = async (
         as a <strong>${role}</strong>.
       </p>
 
-      <p>Click below to accept your invitation:</p>
+      <p>
+        Click the button below to accept your invitation.
+      </p>
 
       <a
         href="${invitationLink}"
         style="
           display: inline-block;
-          padding: 10px 20px;
-          background: #2563eb;
-          color: white;
+          padding: 12px 24px;
+          background-color: #2563eb;
+          color: #ffffff;
           text-decoration: none;
-          border-radius: 5px;
+          border-radius: 6px;
+          font-weight: 600;
         "
       >
         Accept Invitation
       </a>
 
-      <p>This invitation expires in 7 days.</p>
+      <p style="margin-top: 24px;">
+        This invitation expires in 7 days.
+      </p>
+
+      <p>
+        If you were not expecting this invitation, you can ignore this email.
+      </p>
     </div>
   `;
 
@@ -230,13 +246,16 @@ export const verifyEmailConnection = async () => {
       await transporter.verify();
 
       console.log("Gmail SMTP connection successful!");
+
       return true;
     }
 
     console.error(`Unsupported email provider: ${emailProvider}`);
+
     return false;
   } catch (error) {
     console.error("Email service check failed:", error);
+
     return false;
   }
 };
