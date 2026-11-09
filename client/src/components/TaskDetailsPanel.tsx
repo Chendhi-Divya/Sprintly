@@ -18,6 +18,7 @@ import {
   FileText,
   Image,
   Upload,
+  Trash2,
 } from "lucide-react";
 
 import {
@@ -26,6 +27,7 @@ import {
   useGetOrganizationByIdQuery,
   useUpdateTaskMutation,
   useUploadTaskAttachmentMutation,
+  useDeleteTaskAttachmentMutation,
   useGetTaskCommentsQuery,
   useAddTaskCommentMutation,
   type TaskPriority,
@@ -112,6 +114,9 @@ export default function TaskDetailsPanel({
 
   const [uploadTaskAttachment, { isLoading: isUploading }] =
     useUploadTaskAttachmentMutation();
+
+  const [deleteTaskAttachment, { isLoading: isDeletingAttachment }] =
+    useDeleteTaskAttachmentMutation();
 
   const {
     data: commentsData,
@@ -525,6 +530,27 @@ export default function TaskDetailsPanel({
     }
   }
 
+  async function handleDeleteAttachment(attachment: TaskAttachment) {
+    if (!window.confirm(`Delete “${getAttachmentName(attachment)}”?`)) {
+      return;
+    }
+
+    try {
+      await deleteTaskAttachment({
+        taskId,
+        attachmentId: attachment.fileId,
+      }).unwrap();
+
+      await refetchTask();
+      showToast("Attachment deleted successfully.");
+    } catch (error: unknown) {
+      showToast(
+        getFailureMessage(error, "Failed to delete attachment."),
+        "error"
+      );
+    }
+  }
+
   async function copyTaskLink() {
     const taskUrl = new URL("/dashboard", window.location.origin);
     taskUrl.searchParams.set("taskId", taskId);
@@ -830,47 +856,59 @@ export default function TaskDetailsPanel({
                       );
 
                     return (
-                      <a
+                      <div
                         key={attachment._id}
-                        href={attachment.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex min-w-0 items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 transition hover:border-blue-300 hover:bg-blue-50/40"
+                        className="flex min-w-0 items-center gap-2 rounded-xl border border-gray-200 bg-white p-3 transition hover:border-blue-300 hover:bg-blue-50/40"
                       >
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
-                          {isImage ? (
-                            <Image size={19} />
-                          ) : (
-                            <FileText size={19} />
-                          )}
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-gray-800">
-                            {getAttachmentName(attachment)}
-                          </p>
-
-                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-400">
-                            {attachment.size ? (
-                              <span>
-                                {formatFileSize(attachment.size)}
-                              </span>
-                            ) : null}
-
-                            {attachment.uploadedAt ? (
-                              <span>
-                                {new Date(
-                                  attachment.uploadedAt
-                                ).toLocaleDateString()}
-                              </span>
-                            ) : null}
+                        <a
+                          href={attachment.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex min-w-0 flex-1 items-center gap-3"
+                        >
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+                            {isImage ? (
+                              <Image size={19} />
+                            ) : (
+                              <FileText size={19} />
+                            )}
                           </div>
-                        </div>
 
-                        <span className="shrink-0 text-xs font-medium text-blue-600">
-                          Open
-                        </span>
-                      </a>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-gray-800">
+                              {getAttachmentName(attachment)}
+                            </p>
+
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-400">
+                              {attachment.size ? (
+                                <span>
+                                  {formatFileSize(attachment.size)}
+                                </span>
+                              ) : null}
+
+                              {attachment.uploadedAt ? (
+                                <span>
+                                  {new Date(
+                                    attachment.uploadedAt
+                                  ).toLocaleDateString()}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void handleDeleteAttachment(attachment)
+                          }
+                          disabled={isDeletingAttachment}
+                          className="shrink-0 rounded-lg p-2 text-gray-400 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label={`Delete ${getAttachmentName(attachment)}`}
+                          title="Delete attachment"
+                        >
+                          <Trash2 size={17} />
+                        </button>
+                      </div>
                     );
                   })}
                 </div>

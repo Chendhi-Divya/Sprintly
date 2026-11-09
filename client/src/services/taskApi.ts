@@ -49,6 +49,7 @@ export interface ParentTask {
 
 export interface TaskAttachment {
   _id: string;
+  fileId: string;
   filename: string;
   originalName?: string;
   url: string;

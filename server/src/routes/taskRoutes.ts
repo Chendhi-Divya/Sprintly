@@ -14,6 +14,7 @@ import {
 import {
   uploadTaskAttachment,
   getTaskAttachment,
+  deleteTaskAttachment,
 } from "../controllers/taskAttachmentController.js";
 
 import protect from "../middleware/authMiddleware.js";
@@ -57,6 +58,14 @@ router.get(
   protect,
   checkTaskProjectMember,
   getTaskAttachment
+);
+
+// Delete a task attachment
+router.delete(
+  "/:id/attachments/:fileId",
+  protect,
+  checkTaskProjectMember,
+  deleteTaskAttachment
 );
 
 // Get comments for a task
