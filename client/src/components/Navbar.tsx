@@ -1,4 +1,3 @@
-
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useDispatch, useSelector } from "react-redux";
@@ -33,7 +32,6 @@ import {
 
 import {
   useGetProjectsQuery,
-  useGetTasksQuery,
   useCreateTaskMutation,
   useGetOrganizationByIdQuery,
   useGetNotificationsQuery,
@@ -41,7 +39,6 @@ import {
 } from "../services/taskApi";
 
 import type {
-  Task,
   TaskType,
   TaskPriority,
   SprintlyNotification,
@@ -51,14 +48,6 @@ import type {
 type NavbarProps = {
   selectedProjectId?: string;
 };
-
-function getProjectId(task: Task): string {
-  if (typeof task.project === "string") {
-    return task.project;
-  }
-
-  return task.project?._id ?? "";
-}
 
 function getErrorMessage(error: unknown): string {
   if (typeof error === "object" && error !== null) {
@@ -102,12 +91,12 @@ export default function Navbar({
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
 
+  // Create Task states.
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [type, setType] = useState<TaskType>("Task");
   const [priority, setPriority] = useState<TaskPriority>("Medium");
   const [assignee, setAssignee] = useState("");
-  const [parentTask, setParentTask] = useState("");
   const [dueDate, setDueDate] = useState("");
 
   const [errorMessage, setErrorMessage] = useState("");
@@ -135,8 +124,12 @@ export default function Navbar({
     (state: RootState) => state.auth.selectedOrganization
   );
 
+  // MongoDB _id is used for projects and notifications.
   const organizationId = selectedOrganization?._id || "";
+
+  // org_id is used by the GET /organizations/:orgId endpoint.
   const organizationCode = selectedOrganization?.org_id ?? "";
+
   const organizationName = selectedOrganization?.org_name ?? "";
 
   const dispatch = useDispatch();
@@ -168,14 +161,6 @@ export default function Navbar({
     skip: !organizationId,
   });
 
-  const {
-    data: tasksData,
-    isLoading: isLoadingTasks,
-    isFetching: isFetchingTasks,
-    isError: isTasksError,
-    refetch: refetchTasks,
-  } = useGetTasksQuery();
-
   const [createTask, { isLoading: isCreating }] =
     useCreateTaskMutation();
 
@@ -196,7 +181,6 @@ export default function Navbar({
   ] = useMarkNotificationAsReadMutation();
 
   const projects = projectsData?.projects ?? [];
-  const tasks = tasksData?.tasks ?? [];
 
   const selectedProject =
     projects.find((project) => project._id === selectedProjectId) ??
@@ -204,6 +188,8 @@ export default function Navbar({
 
   const projectId = selectedProject?._id ?? "";
 
+  // Fetch organization members when the Create Task modal is opened.
+  // This query expects the organization's org_id, not its MongoDB _id.
   const {
     data: organizationData,
     isLoading: isLoadingMembers,
@@ -213,19 +199,14 @@ export default function Navbar({
     skip: !organizationCode || !showCreateForm,
   });
 
+  // Organization members are populated by the backend.
   const organizationMembers =
     organizationData?.organization?.members ?? [];
 
+  // Keep only populated user objects.
   const projectMembers = organizationMembers.filter(
     (member): member is ProjectUser =>
       typeof member !== "string"
-  );
-
-  const parentTasks = tasks.filter(
-    (task) =>
-      task._id &&
-      task.title &&
-      getProjectId(task) === projectId
   );
 
   const notifications: SprintlyNotification[] =
@@ -280,7 +261,6 @@ export default function Navbar({
       setType("Task");
       setPriority("Medium");
       setAssignee("");
-      setParentTask("");
       setDueDate("");
       setErrorMessage("");
 
@@ -303,11 +283,6 @@ export default function Navbar({
     };
   }, []);
 
-  useEffect(() => {
-    setParentTask("");
-    setAssignee("");
-  }, [projectId]);
-
   // Reset task form.
   function resetForm() {
     setTitle("");
@@ -315,7 +290,6 @@ export default function Navbar({
     setType("Task");
     setPriority("Medium");
     setAssignee("");
-    setParentTask("");
     setDueDate("");
     setErrorMessage("");
   }
@@ -589,17 +563,6 @@ export default function Navbar({
       return;
     }
 
-    // Parent task is required to be valid only when one is selected
-    // for an Epic. Other task types do not use this field.
-    if (
-      type === "Epic" &&
-      parentTask &&
-      !parentTasks.some((task) => task._id === parentTask)
-    ) {
-      setErrorMessage("Please select a valid parent task.");
-      return;
-    }
-
     if (isLoadingMembers) {
       setErrorMessage("Please wait while organization members load.");
       return;
@@ -630,14 +593,12 @@ export default function Navbar({
         priority,
         project: projectId,
         ...(assignee ? { assignee } : {}),
-        ...(type === "Epic" && parentTask ? { parentTask } : {}),
         ...(dueDate ? { dueDate } : {}),
       }).unwrap();
 
       resetForm();
       setShowCreateForm(false);
 
-      void refetchTasks();
       void refetchNotifications();
     } catch (error: unknown) {
       console.error("Failed to create task:", error);
@@ -665,30 +626,6 @@ export default function Navbar({
       );
       setNotificationError(getErrorMessage(error));
     }
-  }
-
-  // Open the task related to a notification.
-  function handleNotificationClick(
-    notification: SprintlyNotification
-  ) {
-    const taskId = notification.task?._id;
-
-    // Dispatch immediately so opening the task does not wait
-    // for the mark-as-read API request.
-    if (taskId) {
-      window.dispatchEvent(
-        new CustomEvent("sprintly:open-task", {
-          detail: { taskId },
-        })
-      );
-    }
-
-    // Mark notification as read.
-    if (!notification.isRead) {
-      void handleMarkAsRead(notification);
-    }
-
-    setShowNotifications(false);
   }
 
   function handleNotificationToggle() {
@@ -743,18 +680,6 @@ export default function Navbar({
     !selectedProject ||
     isLoadingMembers ||
     isMembersError;
-
-  let parentTaskPlaceholder = "Select a parent task";
-
-  if (!projectId) {
-    parentTaskPlaceholder = "Select a project first";
-  } else if (isLoadingTasks || isFetchingTasks) {
-    parentTaskPlaceholder = "Loading tasks...";
-  } else if (isTasksError) {
-    parentTaskPlaceholder = "Could not load tasks";
-  } else if (parentTasks.length === 0) {
-    parentTaskPlaceholder = "No existing tasks in this project";
-  }
 
   const settingsItems = [
     {
@@ -922,35 +847,10 @@ export default function Navbar({
                     {notifications.map((notification) => (
                       <div
                         key={notification._id}
-                        role={
-                          notification.task?._id
-                            ? "button"
-                            : undefined
-                        }
-                        tabIndex={
-                          notification.task?._id ? 0 : undefined
-                        }
-                        onClick={() =>
-                          handleNotificationClick(notification)
-                        }
-                        onKeyDown={(event) => {
-                          if (
-                            notification.task?._id &&
-                            (event.key === "Enter" ||
-                              event.key === " ")
-                          ) {
-                            event.preventDefault();
-                            handleNotificationClick(notification);
-                          }
-                        }}
                         className={`border-b border-gray-100 px-4 py-3 last:border-b-0 ${
                           notification.isRead
                             ? "bg-white"
                             : "bg-blue-50/60"
-                        } ${
-                          notification.task?._id
-                            ? "cursor-pointer transition hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
-                            : ""
                         }`}
                       >
                         <div className="flex items-start gap-3">
@@ -985,10 +885,9 @@ export default function Navbar({
                               type="button"
                               aria-label="Mark notification as read"
                               disabled={isMarkingNotificationRead}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void handleMarkAsRead(notification);
-                              }}
+                              onClick={() =>
+                                void handleMarkAsRead(notification)
+                              }
                               className="shrink-0 rounded-md p-1.5 text-gray-500 hover:bg-white hover:text-blue-600 disabled:opacity-50"
                             >
                               <Check size={16} />
@@ -1167,6 +1066,7 @@ export default function Navbar({
             className="my-auto flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
             onClick={(event) => event.stopPropagation()}
           >
+            {/* Header */}
             <div className="flex items-center justify-between border-b border-gray-100 px-6 py-5">
               <div className="flex items-center gap-3">
                 <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
@@ -1201,6 +1101,7 @@ export default function Navbar({
               </button>
             </div>
 
+            {/* Scrollable content */}
             <div className="space-y-6 overflow-y-auto px-6 py-6">
               {/* Personal information */}
               <section>
@@ -1295,6 +1196,7 @@ export default function Navbar({
                   </p>
                 </div>
 
+                {/* Current email */}
                 <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4">
                   <div className="min-w-0">
                     <p className="text-xs font-medium text-gray-500">
@@ -1317,6 +1219,7 @@ export default function Navbar({
                   )}
                 </div>
 
+                {/* Email editing */}
                 {isEditingEmail && (
                   <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/40 p-4">
                     {!isOTPSent ? (
@@ -1476,6 +1379,7 @@ export default function Navbar({
                   </div>
                 )}
 
+                {/* Show errors outside the new-email field, such as OTP errors. */}
                 {emailError && emailError !== "User already exists" && (
                   <div
                     role="alert"
@@ -1498,6 +1402,7 @@ export default function Navbar({
               </section>
             </div>
 
+            {/* Footer */}
             <div className="border-t border-gray-100 bg-gray-50/80 px-6 py-4">
               <p className="text-xs text-gray-500">
                 Your account details are kept up to date.
@@ -1596,104 +1501,35 @@ export default function Navbar({
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                {/* Task Type and conditional Parent Task */}
-                <div className="space-y-2">
-                  <div>
-                    <label
-                      htmlFor="task-type"
-                      className="mb-1 block text-sm font-medium text-gray-700"
+                {/* Task Type */}
+                <div>
+                  <label
+                    htmlFor="task-type"
+                    className="mb-1 block text-sm font-medium text-gray-700"
+                  >
+                    Task Type
+                  </label>
+
+                  <div className="relative">
+                    <select
+                      id="task-type"
+                      value={type}
+                      onChange={(event) =>
+                        setType(event.target.value as TaskType)
+                      }
+                      className="w-full appearance-none rounded-lg border border-gray-300 bg-white px-3 py-2 pr-10 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                     >
-                      Task Type
-                    </label>
+                      <option value="Epic">Epic</option>
+                      <option value="Story">Story</option>
+                      <option value="Task">Task</option>
+                      <option value="Bug">Bug</option>
+                    </select>
 
-                    <div className="relative">
-                      <select
-                        id="task-type"
-                        value={type}
-                        onChange={(event) => {
-                          const selectedType =
-                            event.target.value as TaskType;
-
-                          setType(selectedType);
-
-                          if (selectedType !== "Epic") {
-                            setParentTask("");
-                          }
-                        }}
-                        className="w-full appearance-none rounded-lg border border-gray-300 bg-white px-3 py-2 pr-10 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                      >
-                        <option value="Epic">Epic</option>
-                        <option value="Story">Story</option>
-                        <option value="Task">Task</option>
-                        <option value="Bug">Bug</option>
-                      </select>
-
-                      <ChevronDown
-                        size={18}
-                        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-600"
-                      />
-                    </div>
+                    <ChevronDown
+                      size={18}
+                      className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-600"
+                    />
                   </div>
-
-                  {/* Parent Task appears only for Epic */}
-                  {type === "Epic" && (
-                    <div>
-                      <label
-                        htmlFor="parent-task"
-                        className="mb-1 block text-xs font-medium text-gray-600"
-                      >
-                        Parent Task
-                      </label>
-
-                      <div className="relative">
-                        <select
-                          id="parent-task"
-                          value={parentTask}
-                          onChange={(event) =>
-                            setParentTask(event.target.value)
-                          }
-                          disabled={
-                            isLoadingTasks ||
-                            isFetchingTasks ||
-                            isTasksError ||
-                            !projectId
-                          }
-                          className="w-full appearance-none rounded-lg border border-gray-300 bg-white px-3 py-2 pr-8 text-xs outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
-                        >
-                          <option value="">
-                            {parentTaskPlaceholder}
-                          </option>
-
-                          {parentTasks.map((task) => (
-                            <option
-                              key={task._id}
-                              value={task._id}
-                            >
-                              {task.taskKey
-                                ? `${task.taskKey} - `
-                                : ""}
-                              {task.title}
-                            </option>
-                          ))}
-                        </select>
-
-                        <ChevronDown
-                          size={15}
-                          className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-600"
-                        />
-                      </div>
-
-                      {isTasksError && (
-                        <button
-                          type="button"
-                          onClick={() => void refetchTasks()}
-                          className="mt-1 text-xs font-medium text-blue-600 hover:underline"
-                        >
-                          Retry loading tasks
-                        </button>
-                      )}
-                    </div>
-                  )}
                 </div>
 
                 {/* Priority */}
@@ -1811,6 +1647,9 @@ export default function Navbar({
                   </button>
                 )}
               </div>
+
+              {/* No Parent Task field here. Parent Epic is selected
+                  later from the Task Details panel. */}
 
               <div className="flex justify-end gap-2 border-t border-gray-100 pt-3">
                 <button

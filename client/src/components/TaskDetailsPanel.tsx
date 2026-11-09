@@ -1,4 +1,3 @@
-
 import { useEffect, useRef, useState } from "react";
 import { useSelector } from "react-redux";
 import type { RootState } from "../store/store";
@@ -15,6 +14,7 @@ import {
   Check,
   Plus,
   ChevronDown,
+  Copy,
   FileText,
   Image,
   Upload,
@@ -52,15 +52,8 @@ type OrganizationMember = {
 
 const priorities: TaskPriority[] = ["Low", "Medium", "High"];
 
-function getFailureMessage(
-  error: unknown,
-  fallback: string
-): string {
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "data" in error
-  ) {
+function getFailureMessage(error: unknown, fallback: string): string {
+  if (typeof error === "object" && error !== null && "data" in error) {
     const data = (error as { data?: unknown }).data;
 
     if (
@@ -79,9 +72,7 @@ function getFailureMessage(
 function formatFileSize(size?: number): string {
   if (!size) return "";
 
-  if (size < 1024) {
-    return `${size} B`;
-  }
+  if (size < 1024) return `${size} B`;
 
   if (size < 1024 * 1024) {
     return `${(size / 1024).toFixed(1)} KB`;
@@ -90,9 +81,7 @@ function formatFileSize(size?: number): string {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function getAttachmentName(
-  attachment: TaskAttachment
-): string {
+function getAttachmentName(attachment: TaskAttachment): string {
   return (
     attachment.originalName ||
     attachment.filename ||
@@ -115,6 +104,7 @@ export default function TaskDetailsPanel({
   const {
     data: allTasksData,
     isLoading: isLoadingTasks,
+    refetch: refetchTasks,
   } = useGetTasksQuery();
 
   const [updateTask, { isLoading: isSaving }] =
@@ -136,8 +126,7 @@ export default function TaskDetailsPanel({
     (state: RootState) => state.auth.selectedOrganization
   );
 
-  const organizationCode =
-    selectedOrganization?.org_id ?? "";
+  const organizationCode = selectedOrganization?.org_id ?? "";
 
   const {
     data: organizationData,
@@ -150,9 +139,7 @@ export default function TaskDetailsPanel({
 
   const task = data?.task ?? initialTask;
   const comments = commentsData?.comments ?? [];
-
-  const attachments: TaskAttachment[] =
-    task?.attachments ?? [];
+  const attachments: TaskAttachment[] = task?.attachments ?? [];
 
   // Organization members
   const organization = organizationData?.organization;
@@ -187,16 +174,13 @@ export default function TaskDetailsPanel({
   const [isEditingDescription, setIsEditingDescription] =
     useState(false);
 
-  const [selectedFile, setSelectedFile] = useState<File | null>(
-    null
-  );
-
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [commentText, setCommentText] = useState("");
 
+  // Add Epic dropdown visibility
   const [showEpicInput, setShowEpicInput] = useState(false);
-
   const epicDropdownRef = useRef<HTMLDivElement>(null);
 
   const [toast, setToast] = useState<{
@@ -204,7 +188,6 @@ export default function TaskDetailsPanel({
     type: ToastType;
   } | null>(null);
 
-  // Toast message
   function showToast(
     text: string,
     type: ToastType = "success"
@@ -216,7 +199,7 @@ export default function TaskDetailsPanel({
     }, 3000);
   }
 
-  // Close dropdown only when clicking outside
+  // Close Add Epic dropdown when clicking outside
   useEffect(() => {
     if (!showEpicInput) return;
 
@@ -239,7 +222,7 @@ export default function TaskDetailsPanel({
     };
   }, [showEpicInput]);
 
-  // Update local inputs when task changes
+  // Update inputs when task changes
   useEffect(() => {
     if (task) {
       setTitle(task.title ?? "");
@@ -247,7 +230,7 @@ export default function TaskDetailsPanel({
     }
   }, [task?._id, task?.title, task?.description]);
 
-  // Close panel using Escape key
+  // Escape key
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -267,7 +250,6 @@ export default function TaskDetailsPanel({
     };
   }, [onClose, showEpicInput]);
 
-  // Loading state
   if (isLoading && !task) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -280,7 +262,6 @@ export default function TaskDetailsPanel({
     );
   }
 
-  // Task error state
   if (!task) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -308,7 +289,7 @@ export default function TaskDetailsPanel({
       ? task.project._id
       : task.project;
 
-  // Get all available parent tasks from the same project
+  // Only Epic tasks from the same project
   const availableEpics = (allTasksData?.tasks ?? []).filter(
     (item) => {
       const itemProjectId =
@@ -318,18 +299,26 @@ export default function TaskDetailsPanel({
 
       return (
         itemProjectId === projectId &&
+        item.type === "Epic" &&
         item._id !== task._id
       );
     }
   );
 
-  // Current parent task
-  const currentParent =
+  // Resolve parent ID whether populated or not
+  const parentTaskId =
     typeof task.parentTask === "object" && task.parentTask
+      ? task.parentTask._id
+      : task.parentTask;
+
+  // Resolve parent task
+  const currentParent =
+    (allTasksData?.tasks ?? []).find(
+      (item) => item._id === parentTaskId
+    ) ??
+    (typeof task.parentTask === "object" && task.parentTask
       ? task.parentTask
-      : availableEpics.find(
-          (parentTask) => parentTask._id === task.parentTask
-        ) ?? null;
+      : null);
 
   // Current assignee ID
   const currentAssigneeId =
@@ -348,7 +337,7 @@ export default function TaskDetailsPanel({
   const labelClass =
     "mb-2 flex items-center gap-2 text-sm font-medium text-gray-600";
 
-  // Save task title
+  // Save title
   async function saveTitle() {
     const updatedTitle = title.trim();
 
@@ -363,6 +352,8 @@ export default function TaskDetailsPanel({
         title: updatedTitle,
       }).unwrap();
 
+      await refetchTask();
+
       setIsEditingTitle(false);
       showToast("Task name updated successfully.");
     } catch (error: unknown) {
@@ -373,13 +364,15 @@ export default function TaskDetailsPanel({
     }
   }
 
-  // Save task description
+  // Save description
   async function saveDescription() {
     try {
       await updateTask({
         id: taskId,
         description,
       }).unwrap();
+
+      await refetchTask();
 
       setIsEditingDescription(false);
       showToast("Description updated successfully.");
@@ -402,6 +395,7 @@ export default function TaskDetailsPanel({
         ...values,
       }).unwrap();
 
+      await refetchTask();
       showToast("Task details updated successfully.");
     } catch (error: unknown) {
       showToast(
@@ -419,6 +413,8 @@ export default function TaskDetailsPanel({
         assignee: assigneeId || null,
       }).unwrap();
 
+      await refetchTask();
+
       showToast(
         assigneeId
           ? "Assignee updated successfully."
@@ -432,22 +428,31 @@ export default function TaskDetailsPanel({
     }
   }
 
-  // Assign parent task
-  async function handleSelectEpic(parentTaskId: string) {
-    if (!parentTaskId) return;
+  // Assign or change or remove selected Epic
+  async function handleSelectEpic(selectedEpicId: string) {
+    if (isSaving) return;
 
     try {
       await updateTask({
         id: taskId,
-        parentTask: parentTaskId,
+        parentTask: selectedEpicId || null,
       }).unwrap();
+
+      await Promise.all([
+        refetchTask(),
+        refetchTasks(),
+      ]);
 
       setShowEpicInput(false);
 
-      showToast("Parent task assigned successfully.");
+      showToast(
+        selectedEpicId
+          ? "Parent Epic updated successfully."
+          : "Parent Epic removed successfully."
+      );
     } catch (error: unknown) {
       showToast(
-        getFailureMessage(error, "Failed to update parent task."),
+        getFailureMessage(error, "Failed to update parent Epic."),
         "error"
       );
     }
@@ -491,7 +496,7 @@ export default function TaskDetailsPanel({
     }
   }
 
-  // Upload selected attachment
+  // Upload attachment
   async function handleFileUpload(file: File) {
     setSelectedFile(file);
 
@@ -502,7 +507,6 @@ export default function TaskDetailsPanel({
       }).unwrap();
 
       await refetchTask();
-
       showToast("File uploaded successfully.");
     } catch (error: unknown) {
       showToast(
@@ -521,7 +525,18 @@ export default function TaskDetailsPanel({
     }
   }
 
-  // Format due date for date input
+  async function copyTaskLink() {
+    const taskUrl = new URL("/dashboard", window.location.origin);
+    taskUrl.searchParams.set("taskId", taskId);
+
+    try {
+      await navigator.clipboard.writeText(taskUrl.toString());
+      showToast("Task link copied to clipboard.");
+    } catch {
+      showToast("Unable to copy the task link.", "error");
+    }
+  }
+
   const formattedDueDate = task.dueDate
     ? new Date(task.dueDate).toISOString().slice(0, 10)
     : "";
@@ -541,8 +556,8 @@ export default function TaskDetailsPanel({
             role="status"
             className={`absolute right-4 top-4 z-[70] flex max-w-[calc(100%-2rem)] items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium shadow-lg ${
               toast.type === "success"
-                ? "bg-green-600 text-white"
-                : "bg-red-600 text-white"
+  ? "bg-gray-800 text-white"
+  : "bg-red-600 text-white"
             }`}
           >
             {toast.type === "success" ? (
@@ -563,108 +578,101 @@ export default function TaskDetailsPanel({
           </div>
         )}
 
-        {/* Header */}
-        <div className="relative z-30 flex shrink-0 items-center justify-between gap-4 border-b border-gray-200 px-6 py-5 sm:px-8">
-          <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-wider text-gray-400">
-              Task details
-            </p>
+       {/* Header */}
+<div className="relative z-30 flex shrink-0 items-center justify-between gap-4 border-b border-gray-200 px-6 py-5 sm:px-8">
+  {/* Left side: Add Epic or selected parent task number */}
+  <div className="flex min-w-0 items-center gap-3">
+    {currentParent ? (
+      <div className="group flex items-center gap-1">
+        <span className="text-sm font-semibold text-blue-600">
+          {currentParent.taskKey ?? "Epic"}
+        </span>
+        <button
+          type="button"
+          onClick={() => void copyTaskLink()}
+          className="rounded p-1 text-gray-400 opacity-0 transition hover:bg-blue-50 hover:text-blue-600 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-blue-400 group-hover:opacity-100"
+          aria-label="Copy link to this task"
+          title="Copy task link"
+        >
+          <Copy size={14} />
+        </button>
+      </div>
+    ) : (
+      task.type !== "Epic" && (
+        <div
+          ref={epicDropdownRef}
+          className="relative shrink-0"
+        >
+          <button
+            type="button"
+            onClick={() =>
+              setShowEpicInput((previous) => !previous)
+            }
+            className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${
+              showEpicInput
+                ? "border-blue-200 bg-blue-50 text-blue-600"
+                : "border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
+            }`}
+          >
+            Add Epic
+            <ChevronDown size={15} />
+          </button>
 
-            <p className="mt-1 truncate text-sm font-semibold text-gray-700">
-              {task.taskKey ?? "Task"}
-            </p>
-          </div>
+          {/* Epic list appears only after clicking Add Epic */}
+          {showEpicInput && (
+            <div className="absolute left-0 top-full z-50 mt-2 w-[min(340px,calc(100vw-2rem))] rounded-xl border border-gray-200 bg-white p-3 shadow-xl">
+              <p className="mb-3 px-2 text-sm font-semibold text-gray-700">
+                Select your Epic
+              </p>
 
-          <div className="ml-auto flex shrink-0 items-center gap-3">
-            {/* Add Epic button and dropdown */}
-            <div ref={epicDropdownRef} className="relative">
-              <button
-                type="button"
-                onClick={() =>
-                  setShowEpicInput((previous) => !previous)
-                }
-                className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${
-                  showEpicInput
-                    ? "border-blue-200 bg-blue-50 text-blue-600"
-                    : "border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
-                }`}
-              >
-                <Plus size={16} />
-                Add Epic
-              </button>
-
-              {showEpicInput && (
-                <div className="absolute right-0 top-full z-50 mt-2 w-[min(320px,calc(100vw-2rem))] rounded-xl border border-gray-200 bg-white p-4 shadow-xl">
-                  <label
-                    htmlFor="parent-epic"
-                    className="mb-2 block text-sm font-semibold text-gray-700"
-                  >
-                    Select your Epic
-                  </label>
-
-                  <div className="relative">
-                    <select
-                      id="parent-epic"
-                      value={currentParent?._id ?? ""}
-                      onChange={(event) =>
-                        void handleSelectEpic(event.target.value)
+              {isLoadingTasks ? (
+                <p className="px-2 py-3 text-sm text-gray-400">
+                  Loading Epic tasks...
+                </p>
+              ) : availableEpics.length === 0 ? (
+                <p className="px-2 py-3 text-sm text-gray-400">
+                  No Epic tasks available in this project.
+                </p>
+              ) : (
+                <div className="max-h-64 space-y-1 overflow-y-auto">
+                  {availableEpics.map((epic) => (
+                    <button
+                      key={epic._id}
+                      type="button"
+                      disabled={isSaving}
+                      onClick={() =>
+                        void handleSelectEpic(epic._id)
                       }
-                      disabled={isLoadingTasks || isSaving}
-                      className="box-border w-full appearance-none rounded-lg border border-gray-300 bg-white px-4 py-3 pr-10 text-sm text-gray-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-100"
+                      className="flex w-full items-center rounded-lg px-3 py-2.5 text-left transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <option value="">
-                        {isLoadingTasks
-                          ? "Loading parent tasks..."
-                          : "Select your Epic"}
-                      </option>
-
-                      {availableEpics.map((parentTask) => (
-                        <option
-                          key={parentTask._id}
-                          value={parentTask._id}
-                        >
-                          {parentTask.title}
-                        </option>
-                      ))}
-                    </select>
-
-                    <ChevronDown
-                      size={16}
-                      className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
-                    />
-                  </div>
-
-                  {!isLoadingTasks &&
-                    availableEpics.length === 0 && (
-                      <p className="mt-2 text-xs text-gray-500">
-                        No parent tasks available in this project.
-                      </p>
-                    )}
-
-                  {currentParent && (
-                    <p className="mt-2 text-xs text-gray-500">
-                      Current parent: {currentParent.title}
-                    </p>
-                  )}
+                      <span className="w-full truncate text-sm font-medium text-gray-700">
+                        {epic.title}
+                      </span>
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
-
-            <button
-              onClick={onClose}
-              className="rounded-lg p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-900"
-              aria-label="Close task details"
-            >
-              <X size={20} />
-            </button>
-          </div>
+          )}
         </div>
+      )
+    )}
+  </div>
 
+  {/* Close button */}
+  <button
+    onClick={onClose}
+    className="shrink-0 rounded-lg p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-900"
+    aria-label="Close task details"
+  >
+    <X size={20} />
+  </button>
+</div>
         {/* Main content */}
         <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_320px]">
           {/* Left section */}
           <div className="min-w-0 space-y-8 p-6 sm:p-8">
-            {/* Editable task name */}
+            {/* Task name */}
             <section>
               {isEditingTitle ? (
                 <div className="space-y-3">
@@ -791,17 +799,14 @@ export default function TaskDetailsPanel({
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <Paperclip size={18} className="text-gray-500" />
-
                   <h3 className="text-base font-semibold text-gray-900">
                     Attachments
                   </h3>
-
                   <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500">
                     {attachments.length}
                   </span>
                 </div>
 
-                {/* Show New button only when attachments exist */}
                 {attachments.length > 0 && (
                   <button
                     type="button"
@@ -815,7 +820,6 @@ export default function TaskDetailsPanel({
                 )}
               </div>
 
-              {/* Uploaded attachments */}
               {attachments.length > 0 && (
                 <div className="space-y-2">
                   {attachments.map((attachment) => {
@@ -872,7 +876,6 @@ export default function TaskDetailsPanel({
                 </div>
               )}
 
-              {/* Large upload box: show only when there are no attachments */}
               {attachments.length === 0 && (
                 <button
                   type="button"
@@ -882,10 +885,7 @@ export default function TaskDetailsPanel({
                 >
                   <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600">
                     {isUploading ? (
-                      <Upload
-                        size={23}
-                        className="animate-pulse"
-                      />
+                      <Upload size={23} className="animate-pulse" />
                     ) : (
                       <Paperclip size={23} />
                     )}
@@ -912,7 +912,6 @@ export default function TaskDetailsPanel({
                 </button>
               )}
 
-              {/* Hidden file input shared by both upload buttons */}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -932,17 +931,12 @@ export default function TaskDetailsPanel({
             {/* Activity */}
             <section>
               <div className="mb-4 flex items-center gap-2">
-                <MessageSquare
-                  size={18}
-                  className="text-gray-500"
-                />
-
+                <MessageSquare size={18} className="text-gray-500" />
                 <h3 className="text-base font-semibold text-gray-900">
                   Activity
                 </h3>
               </div>
 
-              {/* Comments */}
               <div className="w-full space-y-5">
                 <div className="w-full rounded-xl border border-gray-200 bg-white p-3">
                   <textarea
@@ -964,10 +958,7 @@ export default function TaskDetailsPanel({
                       className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                     >
                       <Send size={15} />
-
-                      {isAddingComment
-                        ? "Adding..."
-                        : "Add comment"}
+                      {isAddingComment ? "Adding..." : "Add comment"}
                     </button>
                   </div>
                 </div>
@@ -1105,11 +1096,47 @@ export default function TaskDetailsPanel({
                   Parent
                 </label>
 
-                <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
-                  <p className="truncate text-sm text-gray-700">
-                    {currentParent?.title ?? "No parent task assigned"}
-                  </p>
+                <div className="relative">
+                  <select
+                    value={parentTaskId ?? ""}
+                    onChange={(event) =>
+                      void handleSelectEpic(event.target.value)
+                    }
+                    disabled={isLoadingTasks || isSaving || task.type === "Epic"}
+                    className={`${inputClass} appearance-none pr-10`}
+                  >
+                    <option value="">
+                      {isLoadingTasks
+                        ? "Loading Epic tasks..."
+                        : "No parent"}
+                    </option>
+
+                    {availableEpics.map((epic) => (
+                      <option key={epic._id} value={epic._id}>
+                        {epic.title}
+                      </option>
+                    ))}
+                  </select>
+
+                  <ChevronDown
+                    size={16}
+                    className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-gray-400"
+                  />
                 </div>
+
+                {task.type === "Epic" && (
+                  <p className="mt-2 text-xs text-gray-400">
+                    An Epic cannot have another Epic as its parent.
+                  </p>
+                )}
+
+                {!isLoadingTasks &&
+                  task.type !== "Epic" &&
+                  availableEpics.length === 0 && (
+                    <p className="mt-2 text-xs text-gray-400">
+                      No Epic tasks available in this project.
+                    </p>
+                  )}
               </div>
 
               {/* Sprint */}

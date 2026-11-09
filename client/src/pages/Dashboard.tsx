@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import TaskBoard from "./TaskBoard";
 import ProjectHeader from "../components/ProjectHeader";
 
@@ -31,6 +32,15 @@ export default function Dashboard({
   const [searchText, setSearchText] = useState("");
   const [filters, setFilters] = useState<TaskFilters>(initialFilters);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  useEffect(() => {
+    const taskId = searchParams.get("taskId");
+
+    if (taskId) {
+      setSelectedTaskId(taskId);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     function handleOpenTask(event: Event) {
@@ -51,6 +61,16 @@ export default function Dashboard({
 
   function handleClearFilters() {
     setFilters(initialFilters);
+  }
+
+  function handleTaskClose() {
+    setSelectedTaskId(null);
+
+    if (searchParams.has("taskId")) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete("taskId");
+      setSearchParams(nextParams, { replace: true });
+    }
   }
 
   return (
@@ -74,7 +94,7 @@ export default function Dashboard({
         filters={filters}
         selectedTaskId={selectedTaskId}
         onTaskOpen={setSelectedTaskId}
-        onTaskClose={() => setSelectedTaskId(null)}
+        onTaskClose={handleTaskClose}
       />
     </div>
   );
