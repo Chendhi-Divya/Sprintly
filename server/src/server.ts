@@ -1,3 +1,4 @@
+
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -16,6 +17,7 @@ const app = express();
 const allowedOrigins = [
   "http://localhost:5173",
   "https://sprintly-gamma.vercel.app",
+  "https://sprintly-frontend.onrender.com",
 ];
 
 app.use(
@@ -24,10 +26,13 @@ app.use(
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
+        console.log("Blocked by CORS:", origin);
         callback(new Error("Not allowed by CORS"));
       }
     },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
