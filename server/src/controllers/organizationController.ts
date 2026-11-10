@@ -491,6 +491,10 @@ export const createOrganizationInvitation = async (
         : "";
 
     const role: OrganizationRole = req.body.role ?? "Member";
+    const projectId =
+      typeof req.body.projectId === "string" && req.body.projectId
+        ? req.body.projectId
+        : "";
 
     if (!userId) {
       return res.status(401).json({
@@ -537,12 +541,37 @@ export const createOrganizationInvitation = async (
 
     const existingUser = await User.findOne({ email });
 
+    let invitedProject = null;
+
+    if (projectId) {
+      if (!mongoose.isValidObjectId(projectId)) {
+        return res.status(400).json({
+          message: "Invalid project ID",
+        });
+      }
+
+      invitedProject = await Project.findOne({
+        _id: projectId,
+        organization: organization.org_id,
+      });
+
+      if (!invitedProject) {
+        return res.status(404).json({
+          message: "Project not found in this organization",
+        });
+      }
+    }
+
     if (
       existingUser &&
       organization.members.some(
         (member: any) =>
           member.toString() === existingUser._id.toString()
-      )
+      ) &&
+      (!invitedProject ||
+        invitedProject.members.some(
+          (memberId) => memberId.toString() === existingUser._id.toString()
+        ))
     ) {
       return res.status(409).json({
         message: "This person is already a member",
@@ -565,12 +594,16 @@ export const createOrganizationInvitation = async (
         email,
       },
       {
-        organizationId: org_id,
-        email,
-        role,
-        invitedBy: userId,
-        tokenHash,
-        expiresAt,
+        $set: {
+          organizationId: org_id,
+          email,
+          ...(invitedProject ? { projectId: invitedProject._id } : {}),
+          role,
+          invitedBy: userId,
+          tokenHash,
+          expiresAt,
+        },
+        ...(!invitedProject ? { $unset: { projectId: 1 } } : {}),
       },
       {
         upsert: true,
@@ -606,6 +639,7 @@ export const createOrganizationInvitation = async (
         _id: invitation._id,
         email: invitation.email,
         role: invitation.role,
+        projectId: invitation.projectId?.toString(),
         expiresAt: invitation.expiresAt,
       },
       emailSent,
@@ -1015,6 +1049,19 @@ export const acceptOrganizationInvitation = async (
 
     await ensureMemberships(organization);
 
+    const invitedProject = invitation.projectId
+      ? await Project.findOne({
+          _id: invitation.projectId,
+          organization: organization.org_id,
+        })
+      : null;
+
+    if (invitation.projectId && !invitedProject) {
+      return res.status(404).json({
+        message: "The invited project no longer exists",
+      });
+    }
+
     const alreadyMember = organization.members.some(
       (member: any) =>
         member.toString() === user._id.toString()
@@ -1027,8 +1074,20 @@ export const acceptOrganizationInvitation = async (
         user: user._id,
         role: invitation.role,
       });
+    }
 
+    if (!alreadyMember) {
       await organization.save();
+    }
+
+    if (
+      invitedProject &&
+      !invitedProject.members.some(
+        (memberId) => memberId.toString() === user._id.toString()
+      )
+    ) {
+      invitedProject.members.push(user._id);
+      await invitedProject.save();
     }
 
     await invitation.deleteOne();
@@ -1036,6 +1095,7 @@ export const acceptOrganizationInvitation = async (
     return res.status(200).json({
       message: "Invitation accepted",
       organization,
+      invitedProjectId: invitedProject?._id.toString(),
     });
   } catch (error) {
     console.error("ACCEPT ORGANIZATION INVITATION ERROR:", error);
@@ -1119,34 +1179,51 @@ export const acceptOrganizationInvitationByToken = async (
 
     await ensureMemberships(organization);
 
+    const invitedProject = invitation.projectId
+      ? await Project.findOne({
+          _id: invitation.projectId,
+          organization: organization.org_id,
+        })
+      : null;
+
+    if (invitation.projectId && !invitedProject) {
+      return res.status(404).json({
+        message: "The invited project no longer exists",
+      });
+    }
+
     const alreadyMember = organization.members.some(
       (member: any) =>
         member.toString() === user._id.toString()
     );
 
-    if (alreadyMember) {
-      await invitation.deleteOne();
-
-      return res.status(200).json({
-        message: "You are already a member of this organization",
-        organization,
+    if (!alreadyMember) {
+      organization.members.push(user._id);
+      organization.memberships.push({
+        user: user._id,
+        role: invitation.role,
       });
+      await organization.save();
     }
 
-    organization.members.push(user._id);
-
-    organization.memberships.push({
-      user: user._id,
-      role: invitation.role,
-    });
-
-    await organization.save();
+    if (
+      invitedProject &&
+      !invitedProject.members.some(
+        (memberId) => memberId.toString() === user._id.toString()
+      )
+    ) {
+      invitedProject.members.push(user._id);
+      await invitedProject.save();
+    }
 
     await invitation.deleteOne();
 
     return res.status(200).json({
-      message: "Invitation accepted successfully",
+      message: alreadyMember
+        ? "Project invitation accepted successfully"
+        : "Invitation accepted successfully",
       organization,
+      invitedProjectId: invitedProject?._id.toString(),
     });
   } catch (error) {
     console.error(

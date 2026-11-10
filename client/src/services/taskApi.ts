@@ -335,6 +335,7 @@ export interface Organization {
 export interface OrganizationResponse {
   message?: string;
   organization: Organization;
+  invitedProjectId?: string;
 }
 
 export interface OrganizationsResponse {
@@ -412,6 +413,7 @@ export interface CreateOrganizationInvitationRequest {
   orgId: string;
   email: string;
   role: OrganizationRole;
+  projectId?: string;
 }
 
 export interface CreateOrganizationInvitationResponse {

@@ -99,6 +99,7 @@ export default function Login() {
 
       // Step 3: Check whether the user has an invitation
       let invitedOrganization = null;
+      let invitedProjectId = "";
       const invitationToken = sessionStorage.getItem(
         "organizationInvitationToken"
       );
@@ -110,6 +111,7 @@ export default function Login() {
           }).unwrap();
 
           invitedOrganization = invitationResponse.organization;
+          invitedProjectId = invitationResponse.invitedProjectId ?? "";
 
           // Remove token after successful acceptance
           sessionStorage.removeItem(
@@ -140,7 +142,7 @@ export default function Login() {
         navigate("/dashboard", {
           replace: true,
           state: {
-            selectedProjectId: firstProject?._id ?? "",
+            selectedProjectId: invitedProjectId || firstProject?._id || "",
           },
         });
         return;

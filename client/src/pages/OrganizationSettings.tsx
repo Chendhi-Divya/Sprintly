@@ -34,6 +34,7 @@ import {
   useUpdateOrganizationMutation,
   useDeleteOrganizationMutation,
   useLazyGetOrganizationsQuery,
+  useGetProjectsQuery,
   type OrganizationRole,
   type OrganizationMembership,
   type ProjectUser,
@@ -100,6 +101,7 @@ export default function OrganizationSettings() {
   const [orgName, setOrgName] = useState("");
   const [isEditingOrgName, setIsEditingOrgName] = useState(false);
   const [email, setEmail] = useState("");
+  const [inviteProjectId, setInviteProjectId] = useState("");
   const [inviteRole, setInviteRole] =
     useState<OrganizationRole>("Member");
 
@@ -133,6 +135,15 @@ export default function OrganizationSettings() {
   });
 
   const organization = data?.organization;
+
+  const {
+    data: projectsData,
+    isLoading: isLoadingProjects,
+  } = useGetProjectsQuery(selectedOrganization?._id ?? "", {
+    skip: !selectedOrganization?._id,
+  });
+
+  const organizationProjects = projectsData?.projects ?? [];
 
   const {
     data: incomingData,
@@ -350,13 +361,17 @@ export default function OrganizationSettings() {
         orgId,
         email: email.trim(),
         role: inviteRole,
+        ...(inviteProjectId ? { projectId: inviteProjectId } : {}),
       }).unwrap();
 
       setEmail("");
+      setInviteProjectId("");
 
       setNotice(
         response.emailSent
-          ? "Invitation emailed successfully. It will remain pending until accepted."
+          ? inviteProjectId
+            ? "Project invitation emailed successfully. The member will join the organization and selected project after accepting."
+            : "Invitation emailed successfully. It will remain pending until accepted."
           : "Invitation saved, but email delivery failed. Check the server mail settings; the invite is still pending."
       );
     } catch (error: unknown) {
@@ -876,9 +891,9 @@ export default function OrganizationSettings() {
                     {canManage && (
                       <form
                         onSubmit={handleInvite}
-                        className="mt-5 grid gap-3 rounded-lg bg-slate-50 p-4 sm:grid-cols-[1fr_150px_auto]"
+                        className="mt-5 grid gap-3 rounded-lg bg-slate-50 p-4 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1.4fr)_150px_auto]"
                       >
-                        <span className="text-sm font-semibold text-slate-800 sm:col-span-3">
+                        <span className="text-sm font-semibold text-slate-800 sm:col-span-4">
                           Add a member
                         </span>
 
@@ -898,6 +913,33 @@ export default function OrganizationSettings() {
                             className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-9 pr-3 text-sm outline-none focus:border-blue-500"
                           />
                         </label>
+
+                        <div className="relative min-w-0">
+                          <select
+                            value={inviteProjectId}
+                            onChange={(event) =>
+                              setInviteProjectId(event.target.value)
+                            }
+                            disabled={isLoadingProjects || isInviting}
+                            aria-label="Project access for invite"
+                            className="w-full appearance-none rounded-lg border border-slate-300 bg-white py-2.5 pl-3 pr-10 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+                          >
+                            <option value="">
+                              {isLoadingProjects
+                                ? "Loading projects…"
+                                : "Organization only"}
+                            </option>
+                            {organizationProjects.map((project) => (
+                              <option key={project._id} value={project._id}>
+                                {project.name}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown
+                            size={15}
+                            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500"
+                          />
+                        </div>
 
                         <div className="relative">
                           <select
@@ -932,7 +974,7 @@ export default function OrganizationSettings() {
 
                         <button
                           type="submit"
-                          disabled={isInviting}
+                          disabled={isInviting || isLoadingProjects}
                           className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                         >
                           {isInviting ? "Inviting…" : "Invite"}

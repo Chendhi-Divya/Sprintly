@@ -4,6 +4,7 @@ import type { OrganizationRole } from "./Organization.js";
 
 export interface IOrganizationInvitation extends Document {
   organizationId: string;
+  projectId?: mongoose.Types.ObjectId;
   email: string;
   role: OrganizationRole;
   invitedBy: mongoose.Types.ObjectId;
@@ -15,6 +16,11 @@ export interface IOrganizationInvitation extends Document {
 const invitationSchema = new Schema<IOrganizationInvitation>(
   {
     organizationId: { type: String, required: true, index: true },
+    projectId: {
+      type: Schema.Types.ObjectId,
+      ref: "Project",
+      default: undefined,
+    },
     email: { type: String, required: true, lowercase: true, trim: true },
     role: {
       type: String,

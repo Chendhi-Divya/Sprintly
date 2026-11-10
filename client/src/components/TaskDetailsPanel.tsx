@@ -1,4 +1,3 @@
-
 import { useEffect, useRef, useState } from "react";
 import { useSelector } from "react-redux";
 import type { RootState } from "../store/store";
@@ -14,7 +13,7 @@ import {
   Send,
   Plus,
   ChevronDown,
-  Copy,
+  Link,
   FileText,
   Image,
   Upload,
@@ -31,7 +30,9 @@ import {
   useGetTaskCommentsQuery,
   useAddTaskCommentMutation,
   type TaskPriority,
+  type TaskType,
   type TaskAttachment,
+  useCreateTaskMutation,
 } from "../services/taskApi";
 
 type TaskItem = NonNullable<
@@ -53,11 +54,11 @@ type OrganizationMember = {
 };
 
 const priorities: TaskPriority[] = ["Low", "Medium", "High"];
+const childTaskTypes: TaskType[] = ["Task", "Story", "Bug"];
 
 function getFailureMessage(error: unknown, fallback: string): string {
   if (typeof error === "object" && error !== null && "data" in error) {
     const data = (error as { data?: unknown }).data;
-
     if (
       typeof data === "object" &&
       data !== null &&
@@ -112,6 +113,9 @@ export default function TaskDetailsPanel({
   const [updateTask, { isLoading: isSaving }] =
     useUpdateTaskMutation();
 
+  const [createTask, { isLoading: isCreatingChild }] =
+    useCreateTaskMutation();
+
   const [uploadTaskAttachment, { isLoading: isUploading }] =
     useUploadTaskAttachmentMutation();
 
@@ -150,6 +154,14 @@ export default function TaskDetailsPanel({
   const comments = commentsData?.comments ?? [];
   const attachments: TaskAttachment[] = task?.attachments ?? [];
 
+  const defaultChildParentId = task
+    ? task.type === "Epic"
+      ? task._id
+      : typeof task.parentTask === "object" && task.parentTask
+        ? task.parentTask._id
+        : task.parentTask || task._id
+    : "";
+
   // Organization members
   const organization = organizationData?.organization;
 
@@ -187,6 +199,13 @@ export default function TaskDetailsPanel({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [commentText, setCommentText] = useState("");
+  const [showChildTaskForm, setShowChildTaskForm] = useState(false);
+  const [childTaskTitle, setChildTaskTitle] = useState("");
+  const [childTaskType, setChildTaskType] = useState<TaskType>("Task");
+  const [childTaskPriority, setChildTaskPriority] =
+    useState<TaskPriority>("Medium");
+  const [childParentId, setChildParentId] = useState("");
+  const selectedChildParentId = childParentId || defaultChildParentId;
 
   // Add Epic dropdown visibility
   const [showEpicInput, setShowEpicInput] = useState(false);
@@ -210,6 +229,45 @@ export default function TaskDetailsPanel({
     window.setTimeout(() => {
       setToast(null);
     }, 3000);
+  }
+
+  async function handleCreateChildTask(
+    event: React.FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+
+    const projectId = task
+      ? typeof task.project === "object" && task.project
+        ? task.project._id
+        : task.project
+      : "";
+
+    if (!task || !projectId || !childTaskTitle.trim()) {
+      showToast("Enter a task title before creating it.", "error");
+      return;
+    }
+
+    try {
+      await createTask({
+        title: childTaskTitle.trim(),
+        type: childTaskType,
+        priority: childTaskPriority,
+        project: projectId,
+        parentTask: selectedChildParentId,
+      }).unwrap();
+
+      await refetchTasks();
+      setChildTaskTitle("");
+      setChildTaskType("Task");
+      setChildTaskPriority("Medium");
+      setShowChildTaskForm(false);
+      showToast("Child task created successfully.");
+    } catch (error: unknown) {
+      showToast(
+        getFailureMessage(error, "Failed to create child task."),
+        "error"
+      );
+    }
   }
 
   // Close Add Epic dropdown when clicking outside
@@ -242,6 +300,10 @@ export default function TaskDetailsPanel({
       setDescription(task.description ?? "");
     }
   }, [task?._id, task?.title, task?.description]);
+
+  useEffect(() => {
+    setChildParentId(defaultChildParentId);
+  }, [taskId, defaultChildParentId]);
 
   // Escape key
   useEffect(() => {
@@ -344,6 +406,23 @@ export default function TaskDetailsPanel({
     (typeof task.parentTask === "object" && task.parentTask
       ? task.parentTask
       : null);
+
+  const childTasks = (allTasksData?.tasks ?? []).filter((item) => {
+    const itemParentId =
+      typeof item.parentTask === "object" && item.parentTask
+        ? item.parentTask._id
+        : item.parentTask;
+
+    return itemParentId === selectedChildParentId;
+  });
+
+  const childParentOptions = [
+    currentParent ?? task,
+    ...availableEpics,
+  ].filter(
+    (item, index, items) =>
+      items.findIndex((candidate) => candidate._id === item._id) === index
+  );
 
   // Current assignee ID
   const currentAssigneeId =
@@ -610,11 +689,11 @@ export default function TaskDetailsPanel({
     }
   }
 
-  // Copy task link
-  async function copyTaskLink() {
+  // Copy link to a task using its ID
+  async function copyTaskLink(targetTaskId: string) {
     const taskUrl = new URL("/dashboard", window.location.origin);
 
-    taskUrl.searchParams.set("taskId", taskId);
+    taskUrl.searchParams.set("taskId", targetTaskId);
 
     try {
       await navigator.clipboard.writeText(taskUrl.toString());
@@ -709,81 +788,92 @@ export default function TaskDetailsPanel({
 
         {/* Header */}
         <div className="relative z-30 flex shrink-0 items-center justify-between gap-4 border-b border-gray-200 px-6 py-5 sm:px-8">
-          <div className="flex min-w-0 items-center gap-3">
-            {currentParent ? (
-              <div className="group flex items-center gap-1">
-                <span className="text-sm font-semibold text-blue-600">
-                  {currentParent.taskKey ?? "Epic"}
-                </span>
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {/* Current opened task number - no copy link */}
+            <span className="shrink-0 text-sm font-semibold text-blue-600">
+              {task.taskKey ?? ""}
+            </span>
 
-                <button
-                  type="button"
-                  onClick={() => void copyTaskLink()}
-                  className="rounded p-1 text-gray-400 opacity-0 transition hover:bg-blue-50 hover:text-blue-600 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-blue-400 group-hover:opacity-100"
-                  aria-label="Copy link to this task"
-                  title="Copy task link"
-                >
-                  <Copy size={14} />
-                </button>
-              </div>
-            ) : (
-              task.type !== "Epic" && (
-                <div
-                  ref={epicDropdownRef}
-                  className="relative shrink-0"
-                >
+            {/* Parent Epic task number - copy link only here */}
+            {currentParent && (
+              <>
+                <span className="text-gray-300">/</span>
+
+                <div className="group flex shrink-0 items-center gap-1">
+                  <span className="text-sm font-semibold text-blue-600">
+                    {currentParent.taskKey ?? "Epic"}
+                  </span>
+
                   <button
                     type="button"
-                    onClick={() =>
-                      setShowEpicInput((previous) => !previous)
-                    }
-                    className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${
-                      showEpicInput
-                        ? "border-blue-200 bg-blue-50 text-blue-600"
-                        : "border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
-                    }`}
+                    onClick={() => void copyTaskLink(currentParent._id)}
+                    className="rounded p-1 text-gray-400 opacity-0 transition hover:bg-blue-50 hover:text-blue-600 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-blue-400 group-hover:opacity-100"
+                    aria-label="Copy link to parent Epic"
+                    title="Copy parent Epic link"
                   >
-                    Add Epic
-                    <ChevronDown size={15} />
+                    <Link size={15} />
                   </button>
-
-                  {showEpicInput && (
-                    <div className="absolute left-0 top-full z-50 mt-2 w-[min(340px,calc(100vw-2rem))] rounded-xl border border-gray-200 bg-white p-3 shadow-xl">
-                      <p className="mb-3 px-2 text-sm font-semibold text-gray-700">
-                        Select your Epic
-                      </p>
-
-                      {isLoadingTasks ? (
-                        <p className="px-2 py-3 text-sm text-gray-400">
-                          Loading Epic tasks...
-                        </p>
-                      ) : availableEpics.length === 0 ? (
-                        <p className="px-2 py-3 text-sm text-gray-400">
-                          No Epic tasks available in this project.
-                        </p>
-                      ) : (
-                        <div className="max-h-64 space-y-1 overflow-y-auto">
-                          {availableEpics.map((epic) => (
-                            <button
-                              key={epic._id}
-                              type="button"
-                              disabled={isSaving}
-                              onClick={() =>
-                                void handleSelectEpic(epic._id)
-                              }
-                              className="flex w-full items-center rounded-lg px-3 py-2.5 text-left transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              <span className="w-full truncate text-sm font-medium text-gray-700">
-                                {epic.title}
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
-              )
+              </>
+            )}
+
+            {/* Add Epic when no parent exists */}
+            {!currentParent && task.type !== "Epic" && (
+              <div
+                ref={epicDropdownRef}
+                className="relative shrink-0"
+              >
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowEpicInput((previous) => !previous)
+                  }
+                  className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                    showEpicInput
+                      ? "border-blue-200 bg-blue-50 text-blue-600"
+                      : "border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
+                  }`}
+                >
+                  Add Epic
+                  <ChevronDown size={15} />
+                </button>
+
+                {showEpicInput && (
+                  <div className="absolute left-0 top-full z-50 mt-2 w-[min(340px,calc(100vw-2rem))] rounded-xl border border-gray-200 bg-white p-3 shadow-xl">
+                    <p className="mb-3 px-2 text-sm font-semibold text-gray-700">
+                      Select your Epic
+                    </p>
+
+                    {isLoadingTasks ? (
+                      <p className="px-2 py-3 text-sm text-gray-400">
+                        Loading Epic tasks...
+                      </p>
+                    ) : availableEpics.length === 0 ? (
+                      <p className="px-2 py-3 text-sm text-gray-400">
+                        No Epic tasks available in this project.
+                      </p>
+                    ) : (
+                      <div className="max-h-64 space-y-1 overflow-y-auto">
+                        {availableEpics.map((epic) => (
+                          <button
+                            key={epic._id}
+                            type="button"
+                            disabled={isSaving}
+                            onClick={() =>
+                              void handleSelectEpic(epic._id)
+                            }
+                            className="flex w-full items-center rounded-lg px-3 py-2.5 text-left transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <span className="w-full truncate text-sm font-medium text-gray-700">
+                              {epic.taskKey} - {epic.title}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
@@ -1071,6 +1161,164 @@ export default function TaskDetailsPanel({
                   }
                 }}
               />
+            </section>
+
+            {/* Child tasks */}
+            <section>
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-semibold text-gray-900">
+                    Child tasks
+                  </h3>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Tasks under {currentParent?.title ?? task.title}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setChildParentId(defaultChildParentId);
+                    setShowChildTaskForm((visible) => !visible);
+                  }}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
+                  aria-label="Create child task"
+                >
+                  <Plus size={16} />
+                  Add task
+                </button>
+              </div>
+
+              {showChildTaskForm && (
+                <form
+                  onSubmit={handleCreateChildTask}
+                  className="mb-4 space-y-3 rounded-xl border border-blue-100 bg-blue-50/40 p-4"
+                >
+                  <input
+                    value={childTaskTitle}
+                    onChange={(event) => setChildTaskTitle(event.target.value)}
+                    placeholder="Child task title"
+                    required
+                    className={inputClass}
+                  />
+
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div className="relative">
+                      <select
+                        value={selectedChildParentId}
+                        onChange={(event) => setChildParentId(event.target.value)}
+                        className={`${inputClass} appearance-none pr-10`}
+                        aria-label="Parent task"
+                      >
+                        {childParentOptions.map((parent) => (
+                          <option key={parent._id} value={parent._id}>
+                            {parent.taskKey
+                              ? `${parent.taskKey} - ${parent.title}`
+                              : parent.title}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown
+                        size={16}
+                        className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-gray-400"
+                      />
+                    </div>
+
+                    <div className="relative">
+                      <select
+                        value={childTaskType}
+                        onChange={(event) =>
+                          setChildTaskType(event.target.value as TaskType)
+                        }
+                        className={`${inputClass} appearance-none pr-10`}
+                        aria-label="Child task type"
+                      >
+                        {childTaskTypes.map((item) => (
+                          <option key={item} value={item}>{item}</option>
+                        ))}
+                      </select>
+                      <ChevronDown
+                        size={16}
+                        className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-gray-400"
+                      />
+                    </div>
+
+                    <div className="relative">
+                      <select
+                        value={childTaskPriority}
+                        onChange={(event) =>
+                          setChildTaskPriority(event.target.value as TaskPriority)
+                        }
+                        className={`${inputClass} appearance-none pr-10`}
+                        aria-label="Child task priority"
+                      >
+                        {priorities.map((item) => (
+                          <option key={item} value={item}>{item}</option>
+                        ))}
+                      </select>
+                      <ChevronDown
+                        size={16}
+                        className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-gray-400"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowChildTaskForm(false)}
+                      disabled={isCreatingChild}
+                      className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isCreatingChild || !childTaskTitle.trim()}
+                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {isCreatingChild ? "Creating..." : "Create task"}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {isLoadingTasks ? (
+                <p className="text-sm text-gray-400">Loading child tasks...</p>
+              ) : childTasks.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-gray-200 p-4 text-sm text-gray-500">
+                  No child tasks yet.
+                </p>
+              ) : (
+                <div className="divide-y rounded-xl border border-gray-200">
+                  {childTasks.map((childTask) => (
+                    <button
+                      key={childTask._id}
+                      type="button"
+                      onClick={() =>
+                        window.dispatchEvent(
+                          new CustomEvent("sprintly:open-task", {
+                            detail: { taskId: childTask._id },
+                          })
+                        )
+                      }
+                      className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-gray-50"
+                    >
+                      <span className="min-w-0">
+                        <span className="mr-2 font-mono text-xs font-medium text-blue-600">
+                          {childTask.taskKey ?? "Task"}
+                        </span>
+                        <span className="text-sm font-medium text-gray-800">
+                          {childTask.title}
+                        </span>
+                      </span>
+                      <span className="shrink-0 rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-600">
+                        {childTask.status}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </section>
 
             {/* Activity */}
