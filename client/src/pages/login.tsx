@@ -98,15 +98,18 @@ export default function Login() {
       );
 
       // Step 3: Check whether the user has an invitation
+      let invitedOrganization = null;
       const invitationToken = sessionStorage.getItem(
         "organizationInvitationToken"
       );
 
       if (invitationToken) {
         try {
-          await acceptInvitation({
+          const invitationResponse = await acceptInvitation({
             token: invitationToken,
           }).unwrap();
+
+          invitedOrganization = invitationResponse.organization;
 
           // Remove token after successful acceptance
           sessionStorage.removeItem(
@@ -122,6 +125,25 @@ export default function Login() {
 
           return;
         }
+      }
+
+      // Open the organization from the invitation instead of showing the
+      // organization chooser or restoring a different organization's workspace.
+      if (invitedOrganization) {
+        dispatch(setSelectedOrganization(invitedOrganization));
+
+        const projectResponse = await getProjects(
+          invitedOrganization._id
+        ).unwrap();
+        const firstProject = projectResponse.projects?.[0];
+
+        navigate("/dashboard", {
+          replace: true,
+          state: {
+            selectedProjectId: firstProject?._id ?? "",
+          },
+        });
+        return;
       }
 
       // Step 4: Fetch organizations
