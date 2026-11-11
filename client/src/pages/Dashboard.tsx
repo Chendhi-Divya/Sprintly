@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import TaskBoard from "./TaskBoard";
 import ProjectHeader from "../components/ProjectHeader";
 
@@ -33,6 +33,7 @@ export default function Dashboard({
   const [filters, setFilters] = useState<TaskFilters>(initialFilters);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
 
   useEffect(() => {
     const taskId = searchParams.get("taskId");
@@ -41,6 +42,14 @@ export default function Dashboard({
       setSelectedTaskId(taskId);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    const state = location.state as { openTaskId?: string } | null;
+
+    if (state?.openTaskId) {
+      setSelectedTaskId(state.openTaskId);
+    }
+  }, [location.state]);
 
   useEffect(() => {
     function handleOpenTask(event: Event) {

@@ -480,7 +480,7 @@ export default function ProjectHeader({
                     {renderFilterSelect(
                       filters.status,
                       (value) => updateFilter("status", value),
-                      "All statuses",
+                      "All status",
                       statuses
                     )}
                   </div>

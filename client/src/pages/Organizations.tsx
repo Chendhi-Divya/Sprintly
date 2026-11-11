@@ -1,17 +1,18 @@
 
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useDispatch } from "react-redux";
-import { Building2, Plus } from "lucide-react";
+import { Building2, LogOut, Plus, X } from "lucide-react";
 
 import {
   useGetOrganizationsQuery,
   useCreateOrganizationMutation,
   useLazyGetProjectsQuery,
 } from "../services/taskApi";
+import { useLogoutMutation } from "../services/authApi";
 
-import { setSelectedOrganization } from "../store/authSlice";
+import { logout, setSelectedOrganization } from "../store/authSlice";
 
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -28,7 +29,15 @@ export default function Organizations() {
     useState("");
 
   const navigate = useNavigate();
+  const location = useLocation();
   const dispatch = useDispatch();
+  const openedFromSwitch = Boolean(
+    (location.state as { fromSwitchOrganization?: boolean } | null)
+      ?.fromSwitchOrganization
+  );
+
+  const [logoutRequest, { isLoading: isLoggingOut }] =
+    useLogoutMutation();
 
   // Fetch organizations belonging to the logged-in user.
   const {
@@ -48,6 +57,23 @@ export default function Organizations() {
     useLazyGetProjectsQuery();
 
   const organizations = data?.organizations ?? [];
+
+  async function handleLogout() {
+    try {
+      await logoutRequest().unwrap();
+    } catch {
+      // Clear the local session even if the server is unavailable.
+    } finally {
+      dispatch(logout());
+      navigate("/login", { replace: true });
+    }
+  }
+
+  function closeOrganizationSwitcher() {
+    if (openedFromSwitch) {
+      navigate("/dashboard", { replace: true });
+    }
+  }
 
   // Select an organization and open its most recently used project.
   const handleSelectOrganization = async (
@@ -275,7 +301,32 @@ export default function Organizations() {
   // Show all available organizations.
   return (
     <main className="min-h-screen bg-background px-4 py-10">
-      <div className="mx-auto max-w-2xl space-y-6 pt-6">
+      <div className="mb-5 flex w-full justify-end pr-4 sm:pr-8">
+        {openedFromSwitch ? (
+          <button
+            type="button"
+            onClick={closeOrganizationSwitcher}
+            className="rounded-lg p-2 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+            aria-label="Close organization switcher"
+            title="Close"
+          >
+            <X size={20} />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void handleLogout()}
+            disabled={isLoggingOut}
+            className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition hover:bg-destructive/5 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <LogOut size={16} />
+            {isLoggingOut ? "Logging out..." : "Log out"}
+          </button>
+        )}
+      </div>
+
+      <div className="mx-auto max-w-2xl">
+        <div className="space-y-6 pt-2">
         <div className="text-center">
           <Building2 className="mx-auto mb-3 h-8 w-8" />
 
@@ -349,6 +400,7 @@ export default function Organizations() {
             <Plus className="mr-2 h-4 w-4" />
             Create new organization
           </Button>
+        </div>
         </div>
       </div>
     </main>

@@ -789,33 +789,29 @@ export default function TaskDetailsPanel({
         {/* Header */}
         <div className="relative z-30 flex shrink-0 items-center justify-between gap-4 border-b border-gray-200 px-6 py-5 sm:px-8">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            {/* Current opened task number - no copy link */}
-            <span className="shrink-0 text-sm font-semibold text-blue-600">
-              {task.taskKey ?? ""}
-            </span>
-
-            {/* Parent Epic task number - copy link only here */}
             {currentParent && (
-              <>
-                <span className="text-gray-300">/</span>
-
-                <div className="group flex shrink-0 items-center gap-1">
-                  <span className="text-sm font-semibold text-blue-600">
-                    {currentParent.taskKey ?? "Epic"}
-                  </span>
-
-                  <button
-                    type="button"
-                    onClick={() => void copyTaskLink(currentParent._id)}
-                    className="rounded p-1 text-gray-400 opacity-0 transition hover:bg-blue-50 hover:text-blue-600 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-blue-400 group-hover:opacity-100"
-                    aria-label="Copy link to parent Epic"
-                    title="Copy parent Epic link"
-                  >
-                    <Link size={15} />
-                  </button>
-                </div>
-              </>
+              <span className="shrink-0 text-sm font-semibold text-blue-600">
+                {currentParent.taskKey ?? "Epic"}
+              </span>
             )}
+
+            {currentParent && <span className="text-gray-300">/</span>}
+
+            <div className="group flex shrink-0 items-center gap-1">
+              <span className="text-sm font-semibold text-blue-600">
+                {task.taskKey ?? ""}
+              </span>
+
+              <button
+                type="button"
+                onClick={() => void copyTaskLink(task._id)}
+                className="rounded p-1 text-gray-400 opacity-0 transition hover:bg-blue-50 hover:text-blue-600 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-blue-400 group-hover:opacity-100"
+                aria-label="Copy link to this task"
+                title="Copy current task link"
+              >
+                <Link size={15} />
+              </button>
+            </div>
 
             {/* Add Epic when no parent exists */}
             {!currentParent && task.type !== "Epic" && (
@@ -1365,10 +1361,7 @@ export default function TaskDetailsPanel({
                   <p className="text-sm text-red-500">
                     Unable to load comments.
                   </p>
-                ) : comments.length === 0 ? (
-                  <p className="rounded-xl bg-gray-50 p-4 text-sm text-gray-500">
-                    No comments yet. Start the conversation.
-                  </p>
+                
                 ) : (
                   <div className="space-y-4">
                     {comments.map((comment) => {

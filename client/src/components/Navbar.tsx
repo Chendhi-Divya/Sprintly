@@ -318,7 +318,9 @@ export default function Navbar({
     setShowNotifications(false);
     setShowSettingsMenu(false);
 
-    navigate("/organizations");
+    navigate("/organizations", {
+      state: { fromSwitchOrganization: true },
+    });
   }
 
   function handleClose() {
@@ -628,6 +630,36 @@ export default function Navbar({
     }
   }
 
+  function handleNotificationClick(
+    notification: SprintlyNotification
+  ) {
+    const taskId = notification.task?._id;
+
+    if (!taskId) return;
+
+    setShowNotifications(false);
+
+    if (notification.isRead === false) {
+      void handleMarkAsRead(notification);
+    }
+
+    if (window.location.pathname === "/dashboard") {
+      window.dispatchEvent(
+        new CustomEvent("sprintly:open-task", {
+          detail: { taskId },
+        })
+      );
+      return;
+    }
+
+    navigate("/dashboard", {
+      state: {
+        selectedProjectId,
+        openTaskId: taskId,
+      },
+    });
+  }
+
   function handleNotificationToggle() {
     const willOpen = !showNotifications;
 
@@ -843,42 +875,54 @@ export default function Navbar({
                     </p>
                   </div>
                 ) : (
-                  <div className="max-h-96 overflow-y-auto">
+                  <div className="max-h-[440px] overflow-y-auto">
                     {notifications.map((notification) => (
                       <div
                         key={notification._id}
-                        className={`border-b border-gray-100 px-4 py-3 last:border-b-0 ${
+                        className={`h-[88px] border-b border-gray-100 px-3 last:border-b-0 ${
                           notification.isRead
                             ? "bg-white"
                             : "bg-blue-50/60"
                         }`}
                       >
-                        <div className="flex items-start gap-3">
-                          <span
-                            className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
-                              notification.isRead
-                                ? "bg-gray-300"
-                                : "bg-blue-600"
-                            }`}
-                          />
+                        <div className="flex h-full items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleNotificationClick(notification)}
+                            disabled={!notification.task?._id}
+                            className="flex h-full min-w-0 flex-1 items-center gap-3 text-left disabled:cursor-default"
+                            aria-label={
+                              notification.task?._id
+                                ? `Open task: ${notification.task.title ?? notification.message}`
+                                : notification.message
+                            }
+                          >
+                            <span
+                              className={`h-2 w-2 shrink-0 rounded-full ${
+                                notification.isRead
+                                  ? "bg-gray-300"
+                                  : "bg-blue-600"
+                              }`}
+                            />
 
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm leading-5 text-gray-800">
-                              {notification.message}
-                            </p>
+                            <span className="min-w-0 flex-1">
+                              <span className="line-clamp-2 block text-sm leading-5 text-gray-800">
+                                {notification.message}
+                              </span>
 
-                            {notification.task?.title && (
-                              <p className="mt-1 truncate text-xs text-gray-500">
-                                Task: {notification.task.title}
-                              </p>
-                            )}
-
-                            <p className="mt-1.5 text-xs text-gray-400">
-                              {formatNotificationDate(
-                                notification.createdAt
+                              {notification.task?.title && (
+                                <span className="mt-0.5 block truncate text-xs text-gray-500">
+                                  Task: {notification.task.title}
+                                </span>
                               )}
-                            </p>
-                          </div>
+
+                              <span className="mt-0.5 block text-xs text-gray-400">
+                                {formatNotificationDate(
+                                  notification.createdAt
+                                )}
+                              </span>
+                            </span>
+                          </button>
 
                           {!notification.isRead && (
                             <button
