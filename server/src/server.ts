@@ -8,6 +8,7 @@ import organizationRoutes from "./routes/organizationRoutes.js";
 import projectRoutes from "./routes/projectRoutes.js";
 import taskRoutes from "./routes/taskRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
+import sprintRoutes from "./routes/sprintRoutes.js";
 import { verifyEmailConnection } from "./services/emailService.js";
 
 dotenv.config();
@@ -43,6 +44,7 @@ app.use("/api/organizations", organizationRoutes);
 app.use("/api/projects", projectRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api", sprintRoutes);
 
 app.get("/", (_req, res) => {
   res.json({

@@ -24,6 +24,7 @@ interface ITask extends Document {
   project: mongoose.Types.ObjectId;
   organization: string;
   parentTask?: mongoose.Types.ObjectId;
+  sprint?: mongoose.Types.ObjectId;
   dueDate?: Date;
   attachments: ITaskAttachment[];
 }
@@ -116,6 +117,11 @@ const taskSchema = new Schema<ITask>(
       type: Schema.Types.ObjectId,
       ref: "Task",
     },
+    sprint: {
+      type: Schema.Types.ObjectId,
+      ref: "Sprint",
+      default: undefined,
+    },
     dueDate: {
       type: Date,
     },
@@ -126,5 +132,7 @@ const taskSchema = new Schema<ITask>(
   },
   { timestamps: true }
 );
+
+taskSchema.index({ project: 1, sprint: 1 });
 
 export default mongoose.model<ITask>("Task", taskSchema);

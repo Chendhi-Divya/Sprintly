@@ -519,6 +519,7 @@ export const getTasks = async (req: Request, res: Response) => {
       .populate("assignee", "name email")
       .populate("reporter", "name email")
       .populate("parentTask", "title taskKey type")
+      .populate("sprint", "title status startDate endDate")
       .sort({ createdAt: 1, _id: 1 })
       .skip(skip)
       .limit(pageLimit);
@@ -563,7 +564,8 @@ export const getTaskById = async (req: Request, res: Response) => {
       .populate("project", "name key")
       .populate("assignee", "name email")
       .populate("reporter", "name email")
-      .populate("parentTask", "title taskKey type");
+      .populate("parentTask", "title taskKey type")
+      .populate("sprint", "title status startDate endDate");
 
     if (!task) {
       return res.status(404).json({

@@ -23,6 +23,7 @@ import {
 import {
   useGetTaskByIdQuery,
   useGetTasksQuery,
+  useGetProjectSprintsQuery,
   useGetOrganizationByIdQuery,
   useUpdateTaskMutation,
   useUploadTaskAttachmentMutation,
@@ -33,6 +34,7 @@ import {
   type TaskType,
   type TaskAttachment,
   useCreateTaskMutation,
+  useSetTaskSprintMutation,
 } from "../services/taskApi";
 
 type TaskItem = NonNullable<
@@ -153,6 +155,14 @@ export default function TaskDetailsPanel({
   const task = data?.task ?? initialTask;
   const comments = commentsData?.comments ?? [];
   const attachments: TaskAttachment[] = task?.attachments ?? [];
+  const taskProjectId =
+    typeof task?.project === "object" && task.project
+      ? task.project._id
+      : task?.project ?? "";
+  const { data: projectSprintsData, isLoading: isLoadingProjectSprints } =
+    useGetProjectSprintsQuery(taskProjectId, { skip: !taskProjectId });
+  const [setTaskSprint, { isLoading: isUpdatingSprint }] =
+    useSetTaskSprintMutation();
 
   const defaultChildParentId = task
     ? task.type === "Epic"
@@ -204,8 +214,14 @@ export default function TaskDetailsPanel({
   const [childTaskType, setChildTaskType] = useState<TaskType>("Task");
   const [childTaskPriority, setChildTaskPriority] =
     useState<TaskPriority>("Medium");
-  const [childParentId, setChildParentId] = useState("");
-  const selectedChildParentId = childParentId || defaultChildParentId;
+  const [childParentSelection, setChildParentSelection] = useState({
+    taskId,
+    parentId: "",
+  });
+  const selectedChildParentId =
+    childParentSelection.taskId === taskId && childParentSelection.parentId
+      ? childParentSelection.parentId
+      : defaultChildParentId;
 
   // Add Epic dropdown visibility
   const [showEpicInput, setShowEpicInput] = useState(false);
@@ -301,10 +317,6 @@ export default function TaskDetailsPanel({
     }
   }, [task?._id, task?.title, task?.description]);
 
-  useEffect(() => {
-    setChildParentId(defaultChildParentId);
-  }, [taskId, defaultChildParentId]);
-
   // Escape key
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
@@ -371,10 +383,7 @@ export default function TaskDetailsPanel({
   }
 
   // Current project ID
-  const projectId =
-    typeof task.project === "object" && task.project
-      ? task.project._id
-      : task.project;
+  const projectId = taskProjectId;
 
   // Only Epic tasks from the same project
   const availableEpics = (allTasksData?.tasks ?? []).filter(
@@ -557,6 +566,25 @@ export default function TaskDetailsPanel({
     } catch (error: unknown) {
       showToast(
         getFailureMessage(error, "Failed to update parent Epic."),
+        "error"
+      );
+    }
+  }
+
+  async function handleSprintChange(sprintId: string) {
+    if (!taskProjectId || isUpdatingSprint) return;
+
+    try {
+      await setTaskSprint({
+        projectId: taskProjectId,
+        taskId,
+        sprintId: sprintId || null,
+      }).unwrap();
+      await refetchTask();
+      showToast("Task sprint updated successfully.");
+    } catch (error: unknown) {
+      showToast(
+        getFailureMessage(error, "Failed to update task sprint."),
         "error"
       );
     }
@@ -1174,7 +1202,7 @@ export default function TaskDetailsPanel({
                 <button
                   type="button"
                   onClick={() => {
-                    setChildParentId(defaultChildParentId);
+                    setChildParentSelection({ taskId, parentId: defaultChildParentId });
                     setShowChildTaskForm((visible) => !visible);
                   }}
                   className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
@@ -1202,7 +1230,7 @@ export default function TaskDetailsPanel({
                     <div className="relative">
                       <select
                         value={selectedChildParentId}
-                        onChange={(event) => setChildParentId(event.target.value)}
+                        onChange={(event) => setChildParentSelection({ taskId, parentId: event.target.value })}
                         className={`${inputClass} appearance-none pr-10`}
                         aria-label="Parent task"
                       >
@@ -1536,11 +1564,45 @@ export default function TaskDetailsPanel({
                   Sprint
                 </label>
 
-                <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
-                  <p className="text-sm text-gray-400">
-                    Sprint functionality not configured yet
-                  </p>
+                <div className="relative">
+                  <select
+                    value={
+                      typeof task.sprint === "object" && task.sprint
+                        ? task.sprint._id
+                        : task.sprint ?? ""
+                    }
+                    onChange={(event) =>
+                      void handleSprintChange(event.target.value)
+                    }
+                    disabled={isLoadingProjectSprints || isUpdatingSprint}
+                    className={`${inputClass} appearance-none pr-10`}
+                    aria-label="Task sprint"
+                  >
+                    <option value="">
+                      {isLoadingProjectSprints ? "Loading sprints..." : "Backlog"}
+                    </option>
+                    {(projectSprintsData?.sprints ?? [])
+                      .filter((sprint) =>
+                        sprint.status !== "Completed" ||
+                        (typeof task.sprint === "object" && task.sprint
+                          ? task.sprint._id === sprint._id
+                          : task.sprint === sprint._id)
+                      )
+                      .map((sprint) => (
+                        <option key={sprint._id} value={sprint._id}>
+                          {sprint.title} · {sprint.status}
+                        </option>
+                      ))}
+                  </select>
+
+                  <ChevronDown
+                    size={16}
+                    className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-gray-400"
+                  />
                 </div>
+                {isUpdatingSprint && (
+                  <p className="mt-2 text-xs text-gray-400">Updating sprint…</p>
+                )}
               </div>
 
               {/* Priority */}

@@ -12,17 +12,19 @@ import {
   Check,
   X,
   Plus,
+  CalendarDays,
 } from "lucide-react";
 
 import {
   useGetProjectsQuery,
   useGetTasksQuery,
+  useGetProjectMembersQuery,
 } from "../services/taskApi";
 
 import type { TaskFilters } from "../pages/Dashboard";
 import type { RootState } from "../store/store";
 
-type ViewType = "Board" | "List";
+type ViewType = "Board" | "List" | "Sprints";
 
 type ProjectHeaderProps = {
   selectedProjectId?: string;
@@ -34,13 +36,14 @@ type ProjectHeaderProps = {
   filters: TaskFilters;
   onFiltersChange: (filters: TaskFilters) => void;
   onClearFilters: () => void;
+  selectedSprintAssigneeId: string;
+  onSprintAssigneeChange: (assigneeId: string) => void;
 };
 
 const statuses = ["To Do", "In Progress", "In Review", "Done"];
 const priorities = ["Low", "Medium", "High"];
 const taskTypes = ["Epic", "Story", "Task", "Bug"];
 
-// Store the recent project separately for each organization.
 const getRecentProjectKey = (organizationId: string) =>
   `sprintly_recent_project_${organizationId}`;
 
@@ -54,23 +57,20 @@ export default function ProjectHeader({
   filters,
   onFiltersChange,
   onClearFilters,
+  selectedSprintAssigneeId,
+  onSprintAssigneeChange,
 }: ProjectHeaderProps) {
-  const [isProjectDropdownOpen, setIsProjectDropdownOpen] =
-    useState(false);
-
+  const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
 
   const navigate = useNavigate();
 
-  // Get the selected organization from Redux.
   const selectedOrganization = useSelector(
     (state: RootState) => state.auth.selectedOrganization
   );
 
-  // Use the MongoDB organization ID consistently.
   const organizationId = selectedOrganization?._id || "";
 
-  // Fetch projects belonging to the selected organization.
   const {
     data: projectsData,
     isLoading,
@@ -81,10 +81,9 @@ export default function ProjectHeader({
 
   const projects = projectsData?.projects ?? [];
 
-  // Fetch tasks to populate the assignee filter.
+  // Existing assignee options for List and Board filters.
   const { data: tasksData } = useGetTasksQuery();
 
-  // Get unique assignees.
   const assignees = useMemo(() => {
     const uniqueAssignees = new Map<
       string,
@@ -112,7 +111,18 @@ export default function ProjectHeader({
     );
   }, [tasksData?.tasks]);
 
-  // Restore a valid selected project after loading projects.
+  // Fetch all members of the currently selected project.
+  const { data: membersData, isLoading: isMembersLoading } =
+    useGetProjectMembersQuery(selectedProjectId, {
+      skip: !selectedProjectId,
+    });
+
+  const projectMembers = useMemo(() => {
+    return [...(membersData?.members ?? [])].sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+  }, [membersData?.members]);
+
   useEffect(() => {
     if (!organizationId || isLoading || isError) {
       return;
@@ -125,14 +135,11 @@ export default function ProjectHeader({
       return;
     }
 
-    // Check whether the currently selected project belongs
-    // to the selected organization.
     const projectExists = projects.some(
       (project) => project._id === selectedProjectId
     );
 
     if (projectExists) {
-      // Keep the current project as the recent project.
       try {
         localStorage.setItem(
           getRecentProjectKey(organizationId),
@@ -145,14 +152,11 @@ export default function ProjectHeader({
       return;
     }
 
-    // If the current project is invalid, check the recent project.
     let recentProjectId = "";
 
     try {
       recentProjectId =
-        localStorage.getItem(
-          getRecentProjectKey(organizationId)
-        ) || "";
+        localStorage.getItem(getRecentProjectKey(organizationId)) || "";
     } catch {
       recentProjectId = "";
     }
@@ -161,8 +165,6 @@ export default function ProjectHeader({
       (project) => project._id === recentProjectId
     );
 
-    // Open the recent project if it exists.
-    // Otherwise, open the first available project.
     const projectToSelect = recentProject ?? projects[0];
 
     onProjectChange?.(projectToSelect._id);
@@ -184,21 +186,21 @@ export default function ProjectHeader({
     onProjectChange,
   ]);
 
-  // Get the currently selected project.
   const selectedProject = projects.find(
     (project) => project._id === selectedProjectId
   );
 
-  const activeFilterCount = Object.values(filters).filter(
-    (value) => value !== ""
-  ).length;
+  const activeFilterCount =
+    activeView === "Sprints"
+      ? selectedSprintAssigneeId
+        ? 1
+        : 0
+      : Object.values(filters).filter((value) => value !== "").length;
 
-  // Handle switching between projects.
   function handleProjectSelect(projectId: string) {
-    // Update the selected project in Dashboard/WorkspaceLayout.
     onProjectChange?.(projectId);
+    onSprintAssigneeChange("");
 
-    // Save the project ID for this organization.
     if (organizationId) {
       try {
         localStorage.setItem(
@@ -221,9 +223,15 @@ export default function ProjectHeader({
   }
 
   function handleCreateTask() {
-    window.dispatchEvent(
-      new Event("sprintly:open-create-task")
-    );
+    window.dispatchEvent(new Event("sprintly:open-create-task"));
+  }
+
+  function handleClearCurrentFilters() {
+    if (activeView === "Sprints") {
+      onSprintAssigneeChange("");
+    } else {
+      onClearFilters();
+    }
   }
 
   const selectClassName =
@@ -262,8 +270,8 @@ export default function ProjectHeader({
 
   return (
     <div className="w-full border-b border-gray-200 bg-white">
-      {/* Project selector */}
-      <div className="flex min-h-[76px] flex-wrap items-center gap-3 px-4 py-4 sm:px-6">
+      {/* Project Selection */}
+      <div className="flex min-h-[76px] flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
           <FolderKanban size={23} />
         </div>
@@ -290,13 +298,10 @@ export default function ProjectHeader({
           </div>
         ) : projects.length === 0 ? (
           <div>
-            <p className="font-medium text-gray-900">
-              No projects yet
-            </p>
-
+            <p className="font-medium text-gray-900">No projects yet</p>
             <p className="text-sm text-gray-500">
-              {selectedOrganization?.org_name ?? "This organization"} has no projects.
-              Create one from Organization Settings.
+              {selectedOrganization?.org_name ?? "This organization"} has no
+              projects. Create one from Organization Settings.
             </p>
           </div>
         ) : (
@@ -305,9 +310,7 @@ export default function ProjectHeader({
               type="button"
               aria-label="Choose project"
               aria-expanded={isProjectDropdownOpen}
-              onClick={() =>
-                setIsProjectDropdownOpen((open) => !open)
-              }
+              onClick={() => setIsProjectDropdownOpen((open) => !open)}
               className="flex max-w-xs items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-left shadow-sm transition hover:border-blue-400 hover:bg-gray-50"
             >
               <span className="truncate text-base font-semibold text-gray-900">
@@ -333,16 +336,13 @@ export default function ProjectHeader({
 
                 <div className="absolute left-0 top-full z-50 mt-2 w-72 rounded-xl border border-gray-200 bg-white p-2 shadow-xl">
                   {projects.map((project) => {
-                    const isSelected =
-                      project._id === selectedProject?._id;
+                    const isSelected = project._id === selectedProject?._id;
 
                     return (
                       <button
                         key={project._id}
                         type="button"
-                        onClick={() =>
-                          handleProjectSelect(project._id)
-                        }
+                        onClick={() => handleProjectSelect(project._id)}
                         className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left ${
                           isSelected
                             ? "bg-blue-50 text-blue-700"
@@ -367,19 +367,23 @@ export default function ProjectHeader({
         )}
       </div>
 
-      {/* View tabs, search, filters and create task */}
-      <div className="flex flex-wrap items-center gap-4 border-t border-gray-100 px-4 py-3 sm:px-6">
-        {/* View tabs */}
+      {/* View Tabs and Task Controls */}
+      <div className="flex flex-wrap items-center gap-3 border-t border-gray-100 px-4 py-1.5 sm:px-6">
         <div className="flex shrink-0 items-center gap-5">
-          {(["List", "Board"] as const).map((tab) => {
-            const Icon = tab === "List" ? List : LayoutDashboard;
+          {(["List", "Board", "Sprints"] as const).map((tab) => {
+            const Icon =
+              tab === "List"
+                ? List
+                : tab === "Sprints"
+                  ? CalendarDays
+                  : LayoutDashboard;
 
             return (
               <button
                 key={tab}
                 type="button"
                 onClick={() => onViewChange(tab)}
-                className={`flex shrink-0 items-center gap-2 border-b-2 py-2 text-sm ${
+                className={`flex shrink-0 items-center gap-2 border-b-2 py-1.5 text-sm ${
                   activeView === tab
                     ? "border-blue-600 font-semibold text-blue-600"
                     : "border-transparent text-gray-500 hover:text-gray-800"
@@ -416,7 +420,7 @@ export default function ProjectHeader({
           )}
         </div>
 
-        {/* Filter */}
+        {/* Filters */}
         <div className="relative shrink-0">
           <button
             type="button"
@@ -429,7 +433,6 @@ export default function ProjectHeader({
             }`}
           >
             <Filter size={16} />
-
             <span>Filter</span>
 
             {activeFilterCount > 0 && (
@@ -458,83 +461,40 @@ export default function ProjectHeader({
               <div className="absolute left-0 top-full z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-gray-200 bg-white p-4 shadow-xl">
                 <div className="mb-4 flex items-center justify-between">
                   <h3 className="font-semibold text-gray-900">
-                    Filter tasks
+                    {activeView === "Sprints"
+                      ? "Filter sprint tasks"
+                      : "Filter tasks"}
                   </h3>
 
                   <button
                     type="button"
-                    onClick={onClearFilters}
+                    onClick={handleClearCurrentFilters}
                     className="text-sm text-blue-600 hover:text-blue-800"
                   >
                     Clear all
                   </button>
                 </div>
 
-                <div className="space-y-4">
-                  {/* Status */}
+                {activeView === "Sprints" ? (
                   <div>
                     <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                      Status
-                    </label>
-
-                    {renderFilterSelect(
-                      filters.status,
-                      (value) => updateFilter("status", value),
-                      "All status",
-                      statuses
-                    )}
-                  </div>
-
-                  {/* Priority */}
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                      Priority
-                    </label>
-
-                    {renderFilterSelect(
-                      filters.priority,
-                      (value) => updateFilter("priority", value),
-                      "All priorities",
-                      priorities
-                    )}
-                  </div>
-
-                  {/* Type */}
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                      Type
-                    </label>
-
-                    {renderFilterSelect(
-                      filters.type,
-                      (value) => updateFilter("type", value),
-                      "All types",
-                      taskTypes
-                    )}
-                  </div>
-
-                  {/* Assignee */}
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                      Assignee
+                      Project member
                     </label>
 
                     <div className="relative">
                       <select
-                        value={filters.assignee ?? ""}
+                        value={selectedSprintAssigneeId}
                         onChange={(event) =>
-                          updateFilter("assignee", event.target.value)
+                          onSprintAssigneeChange(event.target.value)
                         }
+                        disabled={isMembersLoading}
                         className={selectClassName}
                       >
-                        <option value="">All assignees</option>
+                        <option value="">All members</option>
 
-                        {assignees.map((assignee) => (
-                          <option
-                            key={assignee._id}
-                            value={assignee._id}
-                          >
-                            {assignee.name}
+                        {projectMembers.map((member) => (
+                          <option key={member._id} value={member._id}>
+                            {member.name || member.email}
                           </option>
                         ))}
                       </select>
@@ -545,8 +505,91 @@ export default function ProjectHeader({
                         className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-600"
                       />
                     </div>
+
+                    {isMembersLoading && (
+                      <p className="mt-2 text-xs text-gray-500">
+                        Loading project members...
+                      </p>
+                    )}
+
+                    {!isMembersLoading && projectMembers.length === 0 && (
+                      <p className="mt-2 text-xs text-gray-500">
+                        No project members found.
+                      </p>
+                    )}
                   </div>
-                </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                        Status
+                      </label>
+
+                      {renderFilterSelect(
+                        filters.status,
+                        (value) => updateFilter("status", value),
+                        "All status",
+                        statuses
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                        Priority
+                      </label>
+
+                      {renderFilterSelect(
+                        filters.priority,
+                        (value) => updateFilter("priority", value),
+                        "All priorities",
+                        priorities
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                        Type
+                      </label>
+
+                      {renderFilterSelect(
+                        filters.type,
+                        (value) => updateFilter("type", value),
+                        "All types",
+                        taskTypes
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                        Assignee
+                      </label>
+
+                      <div className="relative">
+                        <select
+                          value={filters.assignee ?? ""}
+                          onChange={(event) =>
+                            updateFilter("assignee", event.target.value)
+                          }
+                          className={selectClassName}
+                        >
+                          <option value="">All assignees</option>
+
+                          {assignees.map((assignee) => (
+                            <option key={assignee._id} value={assignee._id}>
+                              {assignee.name}
+                            </option>
+                          ))}
+                        </select>
+
+                        <ChevronDown
+                          size={16}
+                          aria-hidden="true"
+                          className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-600"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <button
                   type="button"

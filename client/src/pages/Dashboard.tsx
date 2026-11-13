@@ -1,9 +1,10 @@
+
 import { useEffect, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import TaskBoard from "./TaskBoard";
 import ProjectHeader from "../components/ProjectHeader";
 
-type ViewType = "Board" | "List";
+type ViewType = "Board" | "List" | "Sprints";
 
 export type TaskFilters = {
   status: string;
@@ -31,9 +32,17 @@ export default function Dashboard({
   const [activeView, setActiveView] = useState<ViewType>("Board");
   const [searchText, setSearchText] = useState("");
   const [filters, setFilters] = useState<TaskFilters>(initialFilters);
+  const [selectedSprintAssigneeId, setSelectedSprintAssigneeId] =
+    useState("");
+
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
+
+  // Reset the Sprint member filter when the project changes.
+  useEffect(() => {
+    setSelectedSprintAssigneeId("");
+  }, [selectedProjectId]);
 
   useEffect(() => {
     const taskId = searchParams.get("taskId");
@@ -94,6 +103,8 @@ export default function Dashboard({
         filters={filters}
         onFiltersChange={setFilters}
         onClearFilters={handleClearFilters}
+        selectedSprintAssigneeId={selectedSprintAssigneeId}
+        onSprintAssigneeChange={setSelectedSprintAssigneeId}
       />
 
       <TaskBoard
@@ -101,6 +112,7 @@ export default function Dashboard({
         activeView={activeView}
         searchText={searchText}
         filters={filters}
+        selectedSprintAssigneeId={selectedSprintAssigneeId}
         selectedTaskId={selectedTaskId}
         onTaskOpen={setSelectedTaskId}
         onTaskClose={handleTaskClose}

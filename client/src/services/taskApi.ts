@@ -23,6 +23,8 @@ export type TaskPriority =
   | "Medium"
   | "High";
 
+export type SprintStatus = "Planning" | "Active" | "Completed";
+
 export interface TaskOrganization {
   _id?: string;
   org_id?: string;
@@ -45,6 +47,12 @@ export interface ParentTask {
   _id: string;
   title: string;
   taskKey?: string;
+}
+
+export interface SprintRef {
+  _id: string;
+  title: string;
+  status: SprintStatus;
 }
 
 export interface TaskAttachment {
@@ -73,6 +81,7 @@ export interface Task {
   updatedAt?: string;
 
   parentTask?: ParentTask | string | null;
+  sprint?: SprintRef | string | null;
 
   assignee?: TaskUser | string | null;
   reporter?: TaskUser | string | null;
@@ -145,6 +154,67 @@ export interface UpdateTaskRequest {
 export interface UpdateTaskResponse {
   message: string;
   task: Task;
+}
+
+export interface ProjectSprint {
+  _id: string;
+  title: string;
+  description?: string;
+  project: string;
+  status: SprintStatus;
+  tasks: Task[];
+  startDate?: string;
+  endDate?: string;
+  startedAt?: string;
+  completedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectSprintsResponse {
+  sprints: ProjectSprint[];
+  backlog: Task[];
+}
+
+export interface CreateSprintRequest {
+  projectId: string;
+  title: string;
+  description?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
+export interface UpdateSprintRequest {
+  projectId: string;
+  sprintId: string;
+  title?: string;
+  description?: string;
+  startDate?: string | null;
+  endDate?: string | null;
+}
+
+export interface SprintActionRequest {
+  projectId: string;
+  sprintId: string;
+}
+
+export interface CompleteSprintRequest extends SprintActionRequest {
+  moveIncompleteToSprintId: string | null;
+}
+
+export interface DeleteSprintRequest extends SprintActionRequest {
+  moveTasksToSprintId: string | null;
+}
+
+export interface SetTaskSprintRequest {
+  projectId: string;
+  taskId: string;
+  sprintId: string | null;
+}
+
+export interface SprintMutationResponse {
+  message: string;
+  sprint?: ProjectSprint;
 }
 
 // ==========================================
@@ -519,6 +589,7 @@ export const taskApi = createApi({
     "TaskComments",
     "TaskSubtasks",
     "TaskAttachments",
+    "Sprints",
   ],
 
   endpoints: (builder) => ({
@@ -579,6 +650,92 @@ export const taskApi = createApi({
         { type: "Tasks", id: arg.id },
         { type: "Tasks", id: "LIST" },
         "Notifications",
+      ],
+    }),
+
+    getProjectSprints: builder.query<ProjectSprintsResponse, string>({
+      query: (projectId) => `/projects/${projectId}/sprints`,
+      providesTags: (_result, _error, projectId) => [
+        { type: "Sprints", id: projectId },
+      ],
+    }),
+
+    createSprint: builder.mutation<
+      SprintMutationResponse,
+      CreateSprintRequest
+    >({
+      query: ({ projectId, ...body }) => ({
+        url: `/projects/${projectId}/sprints`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: (_result, _error, arg) => [
+        { type: "Sprints", id: arg.projectId },
+      ],
+    }),
+
+    updateSprint: builder.mutation<
+      SprintMutationResponse,
+      UpdateSprintRequest
+    >({
+      query: ({ projectId, sprintId, ...body }) => ({
+        url: `/projects/${projectId}/sprints/${sprintId}`,
+        method: "PATCH",
+        body,
+      }),
+      invalidatesTags: (_result, _error, arg) => [
+        { type: "Sprints", id: arg.projectId },
+      ],
+    }),
+
+    startSprint: builder.mutation<SprintMutationResponse, SprintActionRequest>({
+      query: ({ projectId, sprintId }) => ({
+        url: `/projects/${projectId}/sprints/${sprintId}/start`,
+        method: "POST",
+      }),
+      invalidatesTags: (_result, _error, arg) => [
+        { type: "Sprints", id: arg.projectId },
+      ],
+    }),
+
+    completeSprint: builder.mutation<SprintMutationResponse, CompleteSprintRequest>({
+      query: ({ projectId, sprintId, moveIncompleteToSprintId }) => ({
+        url: `/projects/${projectId}/sprints/${sprintId}/complete`,
+        method: "POST",
+        body: { moveIncompleteToSprintId },
+      }),
+      invalidatesTags: (_result, _error, arg) => [
+        { type: "Sprints", id: arg.projectId },
+      ],
+    }),
+
+    deleteSprint: builder.mutation<
+      { message: string },
+      DeleteSprintRequest
+    >({
+      query: ({ projectId, sprintId, moveTasksToSprintId }) => ({
+        url: `/projects/${projectId}/sprints/${sprintId}`,
+        method: "DELETE",
+        body: { moveTasksToSprintId },
+      }),
+      invalidatesTags: (_result, _error, arg) => [
+        { type: "Sprints", id: arg.projectId },
+      ],
+    }),
+
+    setTaskSprint: builder.mutation<
+      TaskResponse,
+      SetTaskSprintRequest
+    >({
+      query: ({ projectId, taskId, sprintId }) => ({
+        url: `/projects/${projectId}/tasks/${taskId}/sprint`,
+        method: "PATCH",
+        body: { sprintId },
+      }),
+      invalidatesTags: (_result, _error, arg) => [
+        { type: "Sprints", id: arg.projectId },
+        { type: "Tasks", id: arg.taskId },
+        { type: "Tasks", id: "LIST" },
       ],
     }),
 
@@ -1047,6 +1204,13 @@ export const {
   useGetTaskByIdQuery,
   useUpdateTaskMutation,
   useCreateTaskMutation,
+  useGetProjectSprintsQuery,
+  useCreateSprintMutation,
+  useUpdateSprintMutation,
+  useStartSprintMutation,
+  useCompleteSprintMutation,
+  useDeleteSprintMutation,
+  useSetTaskSprintMutation,
 
   // Subtasks
   useGetSubtasksQuery,

@@ -1,3 +1,4 @@
+
 import { useMemo, useState } from "react";
 import { ChevronDown, LoaderCircle } from "lucide-react";
 
@@ -5,20 +6,23 @@ import {
   taskApi,
   useGetTasksQuery,
   useUpdateTaskMutation,
+  useGetProjectSprintsQuery,
   type TaskStatus,
 } from "../services/taskApi";
 
 import type { TaskFilters } from "./Dashboard";
 import TaskCard from "../components/TaskCard";
 import TaskDetailsPanel from "../components/TaskDetailsPanel";
+import SprintsView from "../components/SprintsView";
 
-type ViewType = "List" | "Board";
+type ViewType = "List" | "Board" | "Sprints";
 
 type TaskBoardProps = {
   selectedProjectId: string;
   activeView: ViewType;
   searchText: string;
   filters: TaskFilters;
+  selectedSprintAssigneeId: string;
   selectedTaskId: string | null;
   onTaskOpen: (taskId: string) => void;
   onTaskClose: () => void;
@@ -36,11 +40,20 @@ export default function TaskBoard({
   activeView,
   searchText,
   filters,
+  selectedSprintAssigneeId,
   selectedTaskId,
   onTaskOpen,
   onTaskClose,
 }: TaskBoardProps) {
   const { data, isLoading, isError } = useGetTasksQuery();
+
+  // Fetch all project sprints, including completed sprints.
+  const { data: sprintData } = useGetProjectSprintsQuery(
+    selectedProjectId,
+    {
+      skip: !selectedProjectId,
+    }
+  );
 
   const [updateTask] = useUpdateTaskMutation();
   const prefetchTask = taskApi.usePrefetch("getTaskById");
@@ -57,6 +70,7 @@ export default function TaskBoard({
     useState<TaskStatus | null>(null);
 
   const allTasks = data?.tasks ?? [];
+  const projectSprints = sprintData?.sprints ?? [];
 
   // Get tasks belonging to the selected project.
   const tasks = useMemo(() => {
@@ -70,7 +84,35 @@ export default function TaskBoard({
     });
   }, [allTasks, selectedProjectId]);
 
-  // Apply search and filters.
+  // Map every task to its sprint title.
+  // Completed sprint associations are retained for the List view.
+  const sprintByTaskId = useMemo(() => {
+    const sprintMap = new Map<string, string>();
+
+    projectSprints.forEach((sprint) => {
+      sprint.tasks.forEach((sprintTask) => {
+        sprintMap.set(sprintTask._id, sprint.title);
+      });
+    });
+
+    return sprintMap;
+  }, [projectSprints]);
+
+  // Find the current Active Sprint.
+  const activeSprint = useMemo(() => {
+    return projectSprints.find(
+      (sprint) => sprint.status === "Active"
+    );
+  }, [projectSprints]);
+
+  // Get only the task IDs belonging to the Active Sprint.
+  const activeSprintTaskIds = useMemo(() => {
+    return new Set(
+      activeSprint?.tasks.map((task) => task._id) ?? []
+    );
+  }, [activeSprint]);
+
+  // Apply search and filters for List and Board views.
   const filteredTasks = useMemo(() => {
     return tasks.filter((task) => {
       const search = searchText.trim().toLowerCase();
@@ -108,6 +150,13 @@ export default function TaskBoard({
       );
     });
   }, [tasks, searchText, filters]);
+
+  // Board view: only tasks belonging to the Active Sprint.
+  const activeSprintTasks = useMemo(() => {
+    return filteredTasks.filter((task) =>
+      activeSprintTaskIds.has(task._id)
+    );
+  }, [filteredTasks, activeSprintTaskIds]);
 
   // Prefetch task details before the user clicks.
   function handleTaskHover(taskId: string) {
@@ -171,7 +220,11 @@ export default function TaskBoard({
       {/* Header */}
       <div className="mb-6">
         <h2 className="text-2xl font-bold">
-          {activeView === "List" ? "Task List" : "Task Board"}
+          {activeView === "List"
+            ? "Task List"
+            : activeView === "Sprints"
+              ? "Project Sprints"
+              : "Task Board"}
         </h2>
 
         <p className="mt-1 text-sm text-gray-500">
@@ -187,18 +240,29 @@ export default function TaskBoard({
       )}
 
       {/* Task count */}
-      <p className="mb-4 text-sm text-gray-500">
-        Showing {filteredTasks.length} of {tasks.length} tasks
-      </p>
+      {activeView !== "Sprints" && (
+        <p className="mb-4 text-sm text-gray-500">
+          {activeView === "Board"
+            ? `Showing ${activeSprintTasks.length} Active Sprint tasks`
+            : `Showing ${filteredTasks.length} of ${tasks.length} tasks`}
+        </p>
+      )}
 
-      {/* List view */}
-      {activeView === "List" ? (
+      {activeView === "Sprints" ? (
+        <SprintsView
+          projectId={selectedProjectId}
+          searchText={searchText}
+          selectedAssigneeId={selectedSprintAssigneeId}
+          onTaskOpen={onTaskOpen}
+        />
+      ) : activeView === "List" ? (
         <div className="overflow-x-auto rounded-xl border">
-          <table className="w-full min-w-[950px] border-collapse text-left text-sm">
+          <table className="w-full min-w-[1050px] border-collapse text-left text-sm">
             <thead className="bg-gray-50 text-xs uppercase text-gray-500">
               <tr>
                 <th className="w-28 px-4 py-3 font-semibold">Key</th>
                 <th className="px-4 py-3 font-semibold">Task</th>
+                <th className="px-4 py-3 font-semibold">Sprint</th>
                 <th className="px-4 py-3 font-semibold">Type</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
                 <th className="px-4 py-3 font-semibold">Priority</th>
@@ -222,6 +286,9 @@ export default function TaskBoard({
                     ? task.reporter.name
                     : "—";
 
+                const sprintName =
+                  sprintByTaskId.get(task._id) ?? "Backlog";
+
                 return (
                   <tr
                     key={task._id}
@@ -241,6 +308,18 @@ export default function TaskBoard({
                       >
                         {task.title}
                       </button>
+                    </td>
+
+                    <td className="px-4 py-4">
+                      <span
+                        className={`inline-flex whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium ${
+                          sprintName === "Backlog"
+                            ? "bg-gray-100 text-gray-600"
+                            : "bg-blue-50 text-blue-700"
+                        }`}
+                      >
+                        {sprintName}
+                      </span>
                     </td>
 
                     <td className="px-4 py-4">{task.type}</td>
@@ -310,7 +389,7 @@ export default function TaskBoard({
               {filteredTasks.length === 0 && (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     className="px-4 py-12 text-center text-gray-500"
                   >
                     No tasks match your search or filters.
@@ -321,109 +400,137 @@ export default function TaskBoard({
           </table>
         </div>
       ) : (
-        /* Board view */
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {columns.map((status) => {
-            const columnTasks = filteredTasks.filter(
-              (task) => task.status === status
-            );
+        /* Board view: Active Sprint tasks only */
+        !activeSprint ? (
+          <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-12 text-center">
+            <h3 className="font-semibold text-gray-800">
+              No Active Sprint
+            </h3>
 
-            return (
-              <section
-                key={status}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = "move";
-                  setDragOverStatus(status);
-                }}
-                onDragLeave={(event) => {
-                  if (
-                    !event.currentTarget.contains(
-                      event.relatedTarget as Node | null
-                    )
-                  ) {
-                    setDragOverStatus(null);
-                  }
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
+            <p className="mt-2 text-sm text-gray-500">
+              Start a planning sprint to display its tasks on the Board.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="mb-4 flex items-center gap-2">
+              <span className="rounded-md bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-700">
+                {activeSprint.title}
+              </span>
 
-                  const taskId =
-                    event.dataTransfer.getData("text/plain") ||
-                    draggedTaskId;
+              <span className="text-xs text-gray-500">
+                Active Sprint
+              </span>
+            </div>
 
-                  const task = tasks.find(
-                    (item) => item._id === taskId
-                  );
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {columns.map((status) => {
+                const columnTasks = activeSprintTasks.filter(
+                  (task) => task.status === status
+                );
 
-                  setDragOverStatus(null);
-                  setDraggedTaskId(null);
-
-                  if (taskId && task?.status !== status) {
-                    void handleStatusChange(taskId, status);
-                  }
-                }}
-                className={`min-h-80 rounded-xl border p-3 transition-colors ${
-                  dragOverStatus === status
-                    ? "border-blue-400 bg-blue-50 ring-2 ring-blue-100"
-                    : "bg-gray-50"
-                }`}
-              >
-                <div className="mb-4 flex justify-between">
-                  <h3 className="font-semibold">{status}</h3>
-
-                  <span className="rounded-full border bg-white px-2">
-                    {columnTasks.length}
-                  </span>
-                </div>
-
-                <div className="min-h-56 space-y-3">
-                  {columnTasks.map((task) => (
-                    <div
-                      key={task._id}
-                      draggable={!updatingTaskIds.has(task._id)}
-                      onMouseEnter={() => handleTaskHover(task._id)}
-                      onFocus={() => handleTaskHover(task._id)}
-                      onDragStart={(event) => {
-                        event.dataTransfer.effectAllowed = "move";
-                        event.dataTransfer.setData("text/plain", task._id);
-                        setDraggedTaskId(task._id);
-                      }}
-                      onDragEnd={() => {
-                        setDraggedTaskId(null);
+                return (
+                  <section
+                    key={status}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                      setDragOverStatus(status);
+                    }}
+                    onDragLeave={(event) => {
+                      if (
+                        !event.currentTarget.contains(
+                          event.relatedTarget as Node | null
+                        )
+                      ) {
                         setDragOverStatus(null);
-                      }}
-                      className={`cursor-grab transition-opacity active:cursor-grabbing ${
-                        draggedTaskId === task._id ? "opacity-40" : ""
-                      }`}
-                      aria-label={`Drag ${task.title} to another status column`}
-                    >
-                      <TaskCard
-                        task={{
-                          ...task,
-                          assignee:
-                            typeof task.assignee === "object" &&
-                            task.assignee !== null
-                              ? task.assignee
-                              : undefined,
-                        }}
-                        isUpdating={updatingTaskIds.has(task._id)}
-                        onStatusChange={handleStatusChange}
-                        onClick={() => onTaskOpen(task._id)}
-                      />
-                    </div>
-                  ))}
+                      }
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
 
-                  {columnTasks.length === 0 && (
-                    <p className="rounded-lg border border-dashed bg-white p-4 text-center text-sm text-gray-500">
-                      No tasks in this column
-                    </p>
-                  )}
-                </div>
-              </section>
-            );
-          })}
-        </div>
+                      const taskId =
+                        event.dataTransfer.getData("text/plain") ||
+                        draggedTaskId;
+
+                      // Only allow status changes for Active Sprint tasks.
+                      const task = activeSprintTasks.find(
+                        (item) => item._id === taskId
+                      );
+
+                      setDragOverStatus(null);
+                      setDraggedTaskId(null);
+
+                      if (task && task.status !== status) {
+                        void handleStatusChange(taskId, status);
+                      }
+                    }}
+                    className={`min-h-80 rounded-xl border p-3 transition-colors ${
+                      dragOverStatus === status
+                        ? "border-blue-400 bg-blue-50 ring-2 ring-blue-100"
+                        : "bg-gray-50"
+                    }`}
+                  >
+                    <div className="mb-4 flex justify-between">
+                      <h3 className="font-semibold">{status}</h3>
+
+                      <span className="rounded-full border bg-white px-2">
+                        {columnTasks.length}
+                      </span>
+                    </div>
+
+                    <div className="min-h-56 space-y-3">
+                      {columnTasks.map((task) => (
+                        <div
+                          key={task._id}
+                          draggable={!updatingTaskIds.has(task._id)}
+                          onMouseEnter={() => handleTaskHover(task._id)}
+                          onFocus={() => handleTaskHover(task._id)}
+                          onDragStart={(event) => {
+                            event.dataTransfer.effectAllowed = "move";
+                            event.dataTransfer.setData(
+                              "text/plain",
+                              task._id
+                            );
+                            setDraggedTaskId(task._id);
+                          }}
+                          onDragEnd={() => {
+                            setDraggedTaskId(null);
+                            setDragOverStatus(null);
+                          }}
+                          className={`cursor-grab transition-opacity active:cursor-grabbing ${
+                            draggedTaskId === task._id ? "opacity-40" : ""
+                          }`}
+                          aria-label={`Drag ${task.title} to another status column`}
+                        >
+                          <TaskCard
+                            task={{
+                              ...task,
+                              assignee:
+                                typeof task.assignee === "object" &&
+                                task.assignee !== null
+                                  ? task.assignee
+                                  : undefined,
+                            }}
+                            isUpdating={updatingTaskIds.has(task._id)}
+                            onStatusChange={handleStatusChange}
+                            onClick={() => onTaskOpen(task._id)}
+                          />
+                        </div>
+                      ))}
+
+                      {columnTasks.length === 0 && (
+                        <p className="rounded-lg border border-dashed bg-white p-4 text-center text-sm text-gray-500">
+                          No tasks in this column
+                        </p>
+                      )}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          </>
+        )
       )}
 
       {/* Task details panel */}
