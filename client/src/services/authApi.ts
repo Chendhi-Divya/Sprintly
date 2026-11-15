@@ -1,4 +1,3 @@
-
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
 import type { RootState } from "../store/store";
 
@@ -47,6 +46,15 @@ interface ResetPasswordRequest {
   newPassword: string;
 }
 
+interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
+interface VerifyChangePasswordRequest {
+  otp: string;
+}
+
 interface EmailChangeResponse extends MessageResponse {
   user: AuthUser;
 }
@@ -79,6 +87,7 @@ export const authApi = createApi({
   tagTypes: ["Auth"],
 
   endpoints: (builder) => ({
+    // Register
     register: builder.mutation<
       MessageResponse,
       {
@@ -95,6 +104,7 @@ export const authApi = createApi({
       }),
     }),
 
+    // Verify registration email OTP
     verifyEmail: builder.mutation<
       VerifyEmailResponse,
       VerifyEmailRequest
@@ -107,6 +117,7 @@ export const authApi = createApi({
       invalidatesTags: ["Auth"],
     }),
 
+    // Login
     login: builder.mutation<LoginResponse, LoginRequest>({
       query: (data) => ({
         url: "/login",
@@ -119,11 +130,13 @@ export const authApi = createApi({
       invalidatesTags: ["Auth"],
     }),
 
+    // Get current user
     getCurrentUser: builder.query<{ user: AuthUser }, void>({
       query: () => "/me",
       providesTags: ["Auth"],
     }),
 
+    // Update profile
     updateProfile: builder.mutation<
       UpdateProfileResponse,
       { name: string }
@@ -136,6 +149,7 @@ export const authApi = createApi({
       invalidatesTags: ["Auth"],
     }),
 
+    // Request email change OTP
     requestEmailChange: builder.mutation<
       MessageResponse,
       EmailRequest
@@ -149,6 +163,7 @@ export const authApi = createApi({
       }),
     }),
 
+    // Verify email change OTP
     verifyEmailChangeOTP: builder.mutation<
       EmailChangeResponse,
       VerifyEmailRequest
@@ -164,6 +179,31 @@ export const authApi = createApi({
       invalidatesTags: ["Auth"],
     }),
 
+    // Request password change OTP
+    changePassword: builder.mutation<
+      MessageResponse,
+      ChangePasswordRequest
+    >({
+      query: (data) => ({
+        url: "/change-password",
+        method: "POST",
+        body: data,
+      }),
+    }),
+
+    // Verify password change OTP
+    verifyChangePasswordOTP: builder.mutation<
+      MessageResponse,
+      VerifyChangePasswordRequest
+    >({
+      query: (data) => ({
+        url: "/verify-change-password",
+        method: "POST",
+        body: data,
+      }),
+    }),
+
+    // Logout
     logout: builder.mutation<MessageResponse, void>({
       query: () => ({
         url: "/logout",
@@ -172,6 +212,7 @@ export const authApi = createApi({
       invalidatesTags: ["Auth"],
     }),
 
+    // Resend registration OTP
     resendOTP: builder.mutation<MessageResponse, EmailRequest>({
       query: (data) => ({
         url: "/resend-otp",
@@ -180,6 +221,7 @@ export const authApi = createApi({
       }),
     }),
 
+    // Forgot password
     forgotPassword: builder.mutation<MessageResponse, EmailRequest>({
       query: (data) => ({
         url: "/forgot-password",
@@ -188,6 +230,7 @@ export const authApi = createApi({
       }),
     }),
 
+    // Reset password
     resetPassword: builder.mutation<
       MessageResponse,
       ResetPasswordRequest
@@ -209,6 +252,8 @@ export const {
   useUpdateProfileMutation,
   useRequestEmailChangeMutation,
   useVerifyEmailChangeOTPMutation,
+  useChangePasswordMutation,
+  useVerifyChangePasswordOTPMutation,
   useLogoutMutation,
   useResendOTPMutation,
   useForgotPasswordMutation,

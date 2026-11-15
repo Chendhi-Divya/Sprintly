@@ -6,6 +6,7 @@ import User from "../models/User.js";
 import PendingUser from "../models/PendingUser.js";
 import EmailChangeOTP from "../models/EmailChangeOTP.js";
 
+import ChangePasswordOTP from "../models/ChangePasswordOTP.js";
 import {
   registerSchema,
   verifyOTPSchema,
@@ -731,6 +732,222 @@ export const verifyEmailChangeOTP = async (
 
     return res.status(500).json({
       message: "Could not verify OTP and update email",
+    });
+  }
+};
+
+
+
+// Change the authenticated user's password.
+// Request an OTP to change the authenticated user's password.
+export const changePassword = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({
+        message: "Authentication required",
+      });
+    }
+
+    const { currentPassword, newPassword } = req.body;
+
+    if (
+      typeof currentPassword !== "string" ||
+      typeof newPassword !== "string" ||
+      !currentPassword ||
+      !newPassword
+    ) {
+      return res.status(400).json({
+        message: "Current password and new password are required.",
+      });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        message: "New password must contain at least 8 characters.",
+      });
+    }
+
+    if (!/[A-Z]/.test(newPassword)) {
+      return res.status(400).json({
+        message: "New password must contain at least one uppercase letter.",
+      });
+    }
+
+    if (!/[0-9]/.test(newPassword)) {
+      return res.status(400).json({
+        message: "New password must contain at least one number.",
+      });
+    }
+
+    if (!/[^A-Za-z0-9]/.test(newPassword)) {
+      return res.status(400).json({
+        message: "New password must contain at least one special character.",
+      });
+    }
+
+    const user = await User.findById(req.userId).select("+password");
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found.",
+      });
+    }
+
+    if (!user.password) {
+      return res.status(400).json({
+        message: "Password change is not available for this account.",
+      });
+    }
+
+    const isCurrentPasswordCorrect = await bcrypt.compare(
+      currentPassword,
+      user.password
+    );
+
+    if (!isCurrentPasswordCorrect) {
+      return res.status(400).json({
+        message: "Current password is incorrect.",
+      });
+    }
+
+    const isSamePassword = await bcrypt.compare(
+      newPassword,
+      user.password
+    );
+
+    if (isSamePassword) {
+      return res.status(400).json({
+        message: "New password must be different from your current password.",
+      });
+    }
+
+    const otp = generateOTP();
+    const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    await ChangePasswordOTP.findOneAndUpdate(
+      { userId: req.userId },
+      {
+        $set: {
+          userId: req.userId,
+          otp,
+          newPassword: hashedNewPassword,
+          otpExpiresAt,
+        },
+      },
+      {
+        upsert: true,
+        new: true,
+        runValidators: true,
+      }
+    );
+
+    try {
+      await sendOTPEmail(user.email, otp);
+    } catch (emailError) {
+      console.error("CHANGE PASSWORD OTP EMAIL ERROR:", emailError);
+
+      await ChangePasswordOTP.deleteOne({
+        userId: req.userId,
+      });
+
+      return res.status(503).json({
+        message: "We couldn't send the OTP. Please try again shortly.",
+      });
+    }
+
+    return res.status(200).json({
+      message: `An OTP has been sent to your registered email address (${user.email}).`,
+    });
+  } catch (error) {
+    console.error("Request change password OTP error:", error);
+
+    return res.status(500).json({
+      message: "Could not process your password change request.",
+    });
+  }
+};
+
+// Verify OTP and update the authenticated user's password.
+export const verifyChangePasswordOTP = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({
+        message: "Authentication required",
+      });
+    }
+
+    const { otp } = req.body;
+
+    if (typeof otp !== "string" || !otp.trim()) {
+      return res.status(400).json({
+        message: "OTP is required.",
+      });
+    }
+
+    const passwordChangeRequest = await ChangePasswordOTP.findOne({
+      userId: req.userId,
+    });
+
+    if (!passwordChangeRequest) {
+      return res.status(404).json({
+        message: "No password change request found. Please request a new OTP.",
+      });
+    }
+
+    if (passwordChangeRequest.otpExpiresAt < new Date()) {
+      await ChangePasswordOTP.deleteOne({
+        _id: passwordChangeRequest._id,
+      });
+
+      return res.status(400).json({
+        message: "OTP has expired. Please request a new OTP.",
+      });
+    }
+
+    if (passwordChangeRequest.otp !== otp.trim()) {
+      return res.status(400).json({
+        message: "Invalid OTP.",
+      });
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      req.userId,
+      {
+        $set: {
+          password: passwordChangeRequest.newPassword,
+        },
+      },
+      {
+        new: true,
+        runValidators: true,
+      }
+    );
+
+    if (!updatedUser) {
+      return res.status(404).json({
+        message: "User not found.",
+      });
+    }
+
+    await ChangePasswordOTP.deleteOne({
+      _id: passwordChangeRequest._id,
+    });
+
+    return res.status(200).json({
+      message: "Password changed successfully.",
+    });
+  } catch (error) {
+    console.error("Verify change password OTP error:", error);
+
+    return res.status(500).json({
+      message: "Could not verify OTP and change password. Please try again.",
     });
   }
 };

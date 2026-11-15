@@ -2,13 +2,17 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+
 import { connectDB } from "./config/db.js";
+import passport from "./config/googleStrategy.js";
+
 import authRoutes from "./routes/authRoutes.js";
 import organizationRoutes from "./routes/organizationRoutes.js";
 import projectRoutes from "./routes/projectRoutes.js";
 import taskRoutes from "./routes/taskRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
 import sprintRoutes from "./routes/sprintRoutes.js";
+
 import { verifyEmailConnection } from "./services/emailService.js";
 
 dotenv.config();
@@ -39,6 +43,10 @@ app.use(
 
 app.use(express.json());
 
+// Initialize Passport
+app.use(passport.initialize());
+
+// API routes
 app.use("/api/auth", authRoutes);
 app.use("/api/organizations", organizationRoutes);
 app.use("/api/projects", projectRoutes);

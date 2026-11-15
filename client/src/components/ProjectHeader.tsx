@@ -370,7 +370,7 @@ export default function ProjectHeader({
       {/* View Tabs and Task Controls */}
       <div className="flex flex-wrap items-center gap-3 border-t border-gray-100 px-4 py-1.5 sm:px-6">
         <div className="flex shrink-0 items-center gap-5">
-          {(["List", "Board", "Sprints"] as const).map((tab) => {
+          {([ "Board", "List", "Sprints"] as const).map((tab) => {
             const Icon =
               tab === "List"
                 ? List

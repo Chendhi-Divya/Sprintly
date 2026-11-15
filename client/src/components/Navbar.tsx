@@ -18,6 +18,7 @@ import {
   UserPen,
   LogOut,
   Mail,
+  KeyRound,
 } from "lucide-react";
 
 import { logout, updateUser } from "../store/authSlice";
@@ -28,6 +29,8 @@ import {
   useUpdateProfileMutation,
   useRequestEmailChangeMutation,
   useVerifyEmailChangeOTPMutation,
+  useChangePasswordMutation,
+  useVerifyChangePasswordOTPMutation,
 } from "../services/authApi";
 
 import {
@@ -91,6 +94,14 @@ export default function Navbar({
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
 
+  // Separate password OTP popup.
+  const [showPasswordOTPModal, setShowPasswordOTPModal] =
+    useState(false);
+
+  // Temporary password OTP success toast.
+  const [showPasswordOTPSuccessToast, setShowPasswordOTPSuccessToast] =
+    useState(false);
+
   // Create Task states.
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -114,6 +125,14 @@ export default function Navbar({
   const [emailError, setEmailError] = useState("");
   const [emailSuccess, setEmailSuccess] = useState("");
 
+  // Change Password states.
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [passwordOTP, setPasswordOTP] = useState("");
+  const [isPasswordOTPSent, setIsPasswordOTPSent] = useState(false);
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordSuccess, setPasswordSuccess] = useState("");
+
   const profileRef = useRef<HTMLDivElement>(null);
   const notificationsRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
@@ -124,12 +143,8 @@ export default function Navbar({
     (state: RootState) => state.auth.selectedOrganization
   );
 
-  // MongoDB _id is used for projects and notifications.
   const organizationId = selectedOrganization?._id || "";
-
-  // org_id is used by the GET /organizations/:orgId endpoint.
   const organizationCode = selectedOrganization?.org_id ?? "";
-
   const organizationName = selectedOrganization?.org_name ?? "";
 
   const dispatch = useDispatch();
@@ -138,20 +153,22 @@ export default function Navbar({
   const [logoutRequest, { isLoading: isLoggingOut }] =
     useLogoutMutation();
 
-  const [
-    updateProfile,
-    { isLoading: isUpdatingProfile },
-  ] = useUpdateProfileMutation();
+  const [updateProfile, { isLoading: isUpdatingProfile }] =
+    useUpdateProfileMutation();
+
+  const [requestEmailChange, { isLoading: isSendingEmailOTP }] =
+    useRequestEmailChangeMutation();
+
+  const [verifyEmailChangeOTP, { isLoading: isVerifyingEmailOTP }] =
+    useVerifyEmailChangeOTPMutation();
+
+  const [changePassword, { isLoading: isSendingPasswordOTP }] =
+    useChangePasswordMutation();
 
   const [
-    requestEmailChange,
-    { isLoading: isSendingEmailOTP },
-  ] = useRequestEmailChangeMutation();
-
-  const [
-    verifyEmailChangeOTP,
-    { isLoading: isVerifyingEmailOTP },
-  ] = useVerifyEmailChangeOTPMutation();
+    verifyChangePasswordOTP,
+    { isLoading: isVerifyingPasswordOTP },
+  ] = useVerifyChangePasswordOTPMutation();
 
   const {
     data: projectsData,
@@ -188,8 +205,6 @@ export default function Navbar({
 
   const projectId = selectedProject?._id ?? "";
 
-  // Fetch organization members when the Create Task modal is opened.
-  // This query expects the organization's org_id, not its MongoDB _id.
   const {
     data: organizationData,
     isLoading: isLoadingMembers,
@@ -199,11 +214,9 @@ export default function Navbar({
     skip: !organizationCode || !showCreateForm,
   });
 
-  // Organization members are populated by the backend.
   const organizationMembers =
     organizationData?.organization?.members ?? [];
 
-  // Keep only populated user objects.
   const projectMembers = organizationMembers.filter(
     (member): member is ProjectUser =>
       typeof member !== "string"
@@ -214,7 +227,17 @@ export default function Navbar({
 
   const unreadCount = notificationsData?.unreadCount ?? 0;
 
-  // Close dropdowns when clicking outside.
+  // Automatically hide the password OTP success toast after 4 seconds.
+  useEffect(() => {
+    if (!showPasswordOTPSuccessToast) return;
+
+    const timeout = window.setTimeout(() => {
+      setShowPasswordOTPSuccessToast(false);
+    }, 4000);
+
+    return () => window.clearTimeout(timeout);
+  }, [showPasswordOTPSuccessToast]);
+
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       const target = event.target;
@@ -253,7 +276,6 @@ export default function Navbar({
     };
   }, []);
 
-  // Listen for Create Task button from ProjectHeader.
   useEffect(() => {
     function handleOpenCreateTask() {
       setTitle("");
@@ -283,7 +305,6 @@ export default function Navbar({
     };
   }, []);
 
-  // Reset task form.
   function resetForm() {
     setTitle("");
     setDescription("");
@@ -294,7 +315,6 @@ export default function Navbar({
     setErrorMessage("");
   }
 
-  // Logout.
   async function handleLogout() {
     try {
       await logoutRequest().unwrap();
@@ -307,12 +327,13 @@ export default function Navbar({
       setShowNotifications(false);
       setShowSettingsMenu(false);
       setShowEditProfile(false);
+      setShowPasswordOTPModal(false);
+      setShowPasswordOTPSuccessToast(false);
 
       navigate("/login", { replace: true });
     }
   }
 
-  // Switch organization without logging out.
   function handleSwitchOrganization() {
     setShowProfileMenu(false);
     setShowNotifications(false);
@@ -330,7 +351,6 @@ export default function Navbar({
     setErrorMessage("");
   }
 
-  // Open Edit Profile modal.
   function handleOpenEditProfile() {
     setProfileName(user?.name ?? "");
     setProfileError("");
@@ -343,21 +363,34 @@ export default function Navbar({
     setEmailError("");
     setEmailSuccess("");
 
+    setCurrentPassword("");
+    setNewPassword("");
+    setPasswordOTP("");
+    setIsPasswordOTPSent(false);
+    setPasswordError("");
+    setPasswordSuccess("");
+    setShowPasswordOTPModal(false);
+    setShowPasswordOTPSuccessToast(false);
+
     setShowProfileMenu(false);
     setShowEditProfile(true);
   }
 
-  // Close Edit Profile modal.
   function handleCloseEditProfile() {
     if (
       isUpdatingProfile ||
       isSendingEmailOTP ||
-      isVerifyingEmailOTP
+      isVerifyingEmailOTP ||
+      isSendingPasswordOTP ||
+      isVerifyingPasswordOTP
     ) {
       return;
     }
 
     setShowEditProfile(false);
+    setShowPasswordOTPModal(false);
+    setShowPasswordOTPSuccessToast(false);
+
     setProfileError("");
     setProfileSuccess("");
     setIsEditingEmail(false);
@@ -366,9 +399,15 @@ export default function Navbar({
     setIsOTPSent(false);
     setEmailError("");
     setEmailSuccess("");
+
+    setCurrentPassword("");
+    setNewPassword("");
+    setPasswordOTP("");
+    setIsPasswordOTPSent(false);
+    setPasswordError("");
+    setPasswordSuccess("");
   }
 
-  // Save updated name.
   async function handleProfileUpdate(
     event: FormEvent<HTMLFormElement>
   ) {
@@ -413,7 +452,6 @@ export default function Navbar({
     }
   }
 
-  // Start editing email.
   function handleStartEmailEdit() {
     setIsEditingEmail(true);
     setNewEmail("");
@@ -423,7 +461,6 @@ export default function Navbar({
     setEmailSuccess("");
   }
 
-  // Cancel email editing.
   function handleCancelEmailEdit() {
     if (isSendingEmailOTP || isVerifyingEmailOTP) return;
 
@@ -435,7 +472,6 @@ export default function Navbar({
     setEmailSuccess("");
   }
 
-  // Send OTP to the new email.
   async function handleSendEmailOTP() {
     setEmailError("");
     setEmailSuccess("");
@@ -482,7 +518,6 @@ export default function Navbar({
         setEmailOTP("");
         setEmailError("User already exists");
         setEmailSuccess("");
-
         return;
       }
 
@@ -490,7 +525,6 @@ export default function Navbar({
     }
   }
 
-  // Verify OTP and update email.
   async function handleVerifyEmailOTP(
     event: FormEvent<HTMLFormElement>
   ) {
@@ -536,7 +570,134 @@ export default function Navbar({
     }
   }
 
-  // Create task.
+  function validatePasswordFields(): boolean {
+    if (!currentPassword) {
+      setPasswordError("Please enter your current password.");
+      return false;
+    }
+
+    if (!newPassword) {
+      setPasswordError("Please enter your new password.");
+      return false;
+    }
+
+    if (newPassword.length < 8) {
+      setPasswordError(
+        "New password must contain at least 8 characters."
+      );
+      return false;
+    }
+
+    if (!/[A-Z]/.test(newPassword)) {
+      setPasswordError(
+        "New password must contain at least one uppercase letter."
+      );
+      return false;
+    }
+
+    if (!/[0-9]/.test(newPassword)) {
+      setPasswordError(
+        "New password must contain at least one number."
+      );
+      return false;
+    }
+
+    if (!/[^A-Za-z0-9]/.test(newPassword)) {
+      setPasswordError(
+        "New password must contain at least one special character."
+      );
+      return false;
+    }
+
+    if (currentPassword === newPassword) {
+      setPasswordError(
+        "Your new password must be different from your current password."
+      );
+      return false;
+    }
+
+    return true;
+  }
+
+  // Request or resend password OTP.
+  async function handleChangePassword(
+    event?: FormEvent<HTMLFormElement>
+  ) {
+    event?.preventDefault();
+
+    setPasswordError("");
+    setPasswordSuccess("");
+    setShowPasswordOTPSuccessToast(false);
+
+    if (!validatePasswordFields()) return;
+
+    try {
+      await changePassword({
+        currentPassword,
+        newPassword,
+      }).unwrap();
+
+      setPasswordOTP("");
+      setIsPasswordOTPSent(true);
+
+      // Show temporary OTP confirmation toast.
+      setShowPasswordOTPSuccessToast(true);
+
+      // Open the separate OTP verification popup.
+      setShowPasswordOTPModal(true);
+    } catch (error: unknown) {
+      console.error("Request password OTP error:", error);
+      setPasswordError(getErrorMessage(error));
+    }
+  }
+
+  async function handleVerifyChangePasswordOTP(
+    event: FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+
+    setPasswordError("");
+    setPasswordSuccess("");
+
+    const trimmedOTP = passwordOTP.trim();
+
+    if (!/^\d{6}$/.test(trimmedOTP)) {
+      setPasswordError("Please enter a valid 6-digit OTP.");
+      return;
+    }
+
+    try {
+      const response = await verifyChangePasswordOTP({
+        otp: trimmedOTP,
+      }).unwrap();
+
+      setPasswordSuccess(
+        response.message || "Password changed successfully."
+      );
+
+      setCurrentPassword("");
+      setNewPassword("");
+      setPasswordOTP("");
+      setIsPasswordOTPSent(false);
+      setShowPasswordOTPModal(false);
+      setShowPasswordOTPSuccessToast(false);
+
+      // Keep the success message visible in Account Settings.
+    } catch (error: unknown) {
+      console.error("Verify password OTP error:", error);
+      setPasswordError(getErrorMessage(error));
+    }
+  }
+
+  function handleClosePasswordOTPModal() {
+    if (isVerifyingPasswordOTP || isSendingPasswordOTP) return;
+
+    setShowPasswordOTPModal(false);
+    setShowPasswordOTPSuccessToast(false);
+    setPasswordOTP("");
+    setPasswordError("");
+  }
+
   async function handleSubmit(
     event: FormEvent<HTMLFormElement>
   ) {
@@ -608,7 +769,6 @@ export default function Navbar({
     }
   }
 
-  // Mark notification as read.
   async function handleMarkAsRead(
     notification: SprintlyNotification
   ) {
@@ -722,15 +882,13 @@ export default function Navbar({
     },
     {
       label: "Members and invitations",
-      description:
-        "Invite people and manage organization members",
+      description: "Invite people and manage organization members",
       icon: UsersRound,
       onClick: () => openOrganizationSettings("Members"),
     },
     {
       label: "Project settings",
-      description:
-        "Edit project name, issue key, access, and workflow",
+      description: "Edit project name, issue key, access, and workflow",
       icon: FolderKanban,
       onClick: openProjectSettings,
     },
@@ -739,7 +897,6 @@ export default function Navbar({
   return (
     <>
       <nav className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-200 bg-white px-5 py-3">
-        {/* Logo and organization */}
         <div className="flex min-w-0 shrink-0 items-center gap-2">
           <div className="rounded-lg bg-blue-600 p-2 text-white">
             <CheckCheck size={21} />
@@ -751,13 +908,7 @@ export default function Navbar({
 
           {organizationName && (
             <>
-              <span
-                aria-hidden="true"
-                className="text-gray-300"
-              >
-                /
-              </span>
-
+              <span className="text-gray-300">/</span>
               <span
                 className="max-w-56 truncate text-base font-semibold text-gray-700"
                 title={organizationName}
@@ -768,28 +919,20 @@ export default function Navbar({
           )}
         </div>
 
-        {/* Global task search */}
         <div className="flex items-center gap-2">
           <div className="flex w-56 items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 focus-within:border-blue-500">
-            <Search
-              size={17}
-              className="shrink-0 text-gray-500"
-            />
-
+            <Search size={17} className="shrink-0 text-gray-500" />
             <input
               type="search"
               placeholder="Search tasks..."
               value={searchText}
-              onChange={(event) =>
-                setSearchText(event.target.value)
-              }
+              onChange={(event) => setSearchText(event.target.value)}
               className="w-full min-w-0 bg-transparent text-sm text-gray-800 outline-none"
               aria-label="Search tasks"
             />
           </div>
         </div>
 
-        {/* Notifications, settings, and profile */}
         <div className="flex shrink-0 items-center gap-4">
           {/* Notifications */}
           <div ref={notificationsRef} className="relative">
@@ -801,7 +944,6 @@ export default function Navbar({
               className="relative rounded-lg p-1.5 text-gray-600 hover:bg-gray-100 hover:text-blue-600"
             >
               <Bell size={21} />
-
               {unreadCount > 0 && (
                 <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">
                   {unreadCount > 99 ? "99+" : unreadCount}
@@ -816,7 +958,6 @@ export default function Navbar({
                     <h2 className="text-sm font-semibold text-gray-900">
                       Notifications
                     </h2>
-
                     <p className="mt-0.5 text-xs text-gray-500">
                       {unreadCount} unread
                     </p>
@@ -850,7 +991,6 @@ export default function Navbar({
                     <p className="text-sm text-red-600">
                       Could not load notifications.
                     </p>
-
                     <button
                       type="button"
                       onClick={() => void refetchNotifications()}
@@ -865,11 +1005,9 @@ export default function Navbar({
                       size={25}
                       className="mx-auto mb-2 text-gray-300"
                     />
-
                     <p className="text-sm font-medium text-gray-700">
                       You're all caught up
                     </p>
-
                     <p className="mt-1 text-xs text-gray-500">
                       New task notifications will appear here.
                     </p>
@@ -888,14 +1026,11 @@ export default function Navbar({
                         <div className="flex h-full items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => handleNotificationClick(notification)}
+                            onClick={() =>
+                              handleNotificationClick(notification)
+                            }
                             disabled={!notification.task?._id}
                             className="flex h-full min-w-0 flex-1 items-center gap-3 text-left disabled:cursor-default"
-                            aria-label={
-                              notification.task?._id
-                                ? `Open task: ${notification.task.title ?? notification.message}`
-                                : notification.message
-                            }
                           >
                             <span
                               className={`h-2 w-2 shrink-0 rounded-full ${
@@ -996,17 +1131,14 @@ export default function Navbar({
                           size={19}
                           className="shrink-0 text-gray-500"
                         />
-
                         <span className="min-w-0 flex-1">
                           <span className="block text-sm font-medium text-gray-800">
                             {item.label}
                           </span>
-
                           <span className="mt-0.5 block text-xs text-gray-500">
                             {item.description}
                           </span>
                         </span>
-
                         <ChevronRight
                           size={16}
                           className="shrink-0 text-gray-400"
@@ -1033,7 +1165,6 @@ export default function Navbar({
               className="flex items-center gap-2 rounded-full bg-gray-100 py-1.5 pl-2 pr-3 text-sm font-medium text-gray-700 hover:bg-gray-200"
             >
               <UserRound size={20} />
-
               <span className="max-w-32 truncate">
                 {user?.name || "Profile"}
               </span>
@@ -1045,12 +1176,10 @@ export default function Navbar({
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-600">
                     <UserRound size={21} />
                   </div>
-
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-gray-900">
                       {user?.name || "User"}
                     </p>
-
                     <p className="truncate text-xs text-gray-500">
                       {user?.email || ""}
                     </p>
@@ -1063,7 +1192,7 @@ export default function Navbar({
                   className="mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-gray-700 transition hover:bg-gray-100"
                 >
                   <UserPen size={18} className="text-gray-500" />
-                  <span>Edit profile</span>
+                  <span>Account Settings</span>
                 </button>
 
                 <button
@@ -1071,10 +1200,7 @@ export default function Navbar({
                   onClick={handleSwitchOrganization}
                   className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-gray-700 transition hover:bg-gray-100"
                 >
-                  <Building2
-                    size={18}
-                    className="text-gray-500"
-                  />
+                  <Building2 size={18} className="text-gray-500" />
                   <span>Switch organization</span>
                 </button>
 
@@ -1097,7 +1223,7 @@ export default function Navbar({
         </div>
       </nav>
 
-      {/* Edit Profile Modal */}
+      {/* Account Settings */}
       {showEditProfile && (
         <div
           className="fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-gray-950/50 p-4 backdrop-blur-sm"
@@ -1107,25 +1233,23 @@ export default function Navbar({
             role="dialog"
             aria-modal="true"
             aria-labelledby="edit-profile-title"
-            className="my-auto flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
+            className="my-auto flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-gray-50 shadow-2xl"
             onClick={(event) => event.stopPropagation()}
           >
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-gray-100 px-6 py-5">
+            <div className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-5">
               <div className="flex items-center gap-3">
                 <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                   <UserPen size={21} />
                 </div>
-
                 <div>
                   <h2
                     id="edit-profile-title"
                     className="text-lg font-semibold text-gray-900"
                   >
-                    Edit profile
+                    Account Settings
                   </h2>
                   <p className="mt-0.5 text-sm text-gray-500">
-                    Manage your account information.
+                    Manage your profile and security preferences.
                   </p>
                 </div>
               </div>
@@ -1136,20 +1260,21 @@ export default function Navbar({
                 disabled={
                   isUpdatingProfile ||
                   isSendingEmailOTP ||
-                  isVerifyingEmailOTP
+                  isVerifyingEmailOTP ||
+                  isSendingPasswordOTP ||
+                  isVerifyingPasswordOTP
                 }
-                aria-label="Close edit profile"
+                aria-label="Close account settings"
                 className="rounded-lg p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
               >
                 <X size={20} />
               </button>
             </div>
 
-            {/* Scrollable content */}
-            <div className="space-y-6 overflow-y-auto px-6 py-6">
-              {/* Personal information */}
-              <section>
-                <div className="mb-4">
+            <div className="space-y-5 overflow-y-auto p-5 sm:p-6">
+              {/* Personal Information */}
+              <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+                <div className="mb-5">
                   <h3 className="text-sm font-semibold text-gray-900">
                     Personal information
                   </h3>
@@ -1169,7 +1294,6 @@ export default function Navbar({
                     >
                       Full name
                     </label>
-
                     <input
                       id="profile-name"
                       type="text"
@@ -1182,14 +1306,14 @@ export default function Navbar({
                       placeholder="Enter your full name"
                       maxLength={60}
                       autoFocus
-                      className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 hover:border-gray-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
                     />
                   </div>
 
                   {profileError && (
                     <div
                       role="alert"
-                      className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700"
+                      className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700"
                     >
                       <X size={17} className="mt-0.5 shrink-0" />
                       <p>{profileError}</p>
@@ -1199,7 +1323,7 @@ export default function Navbar({
                   {profileSuccess && (
                     <div
                       role="status"
-                      className="flex items-start gap-2 rounded-xl border border-green-200 bg-green-50 px-3 py-3 text-sm text-green-700"
+                      className="flex items-start gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2.5 text-sm text-green-700"
                     >
                       <Check size={17} className="mt-0.5 shrink-0" />
                       <p>{profileSuccess}</p>
@@ -1210,44 +1334,38 @@ export default function Navbar({
                     <button
                       type="submit"
                       disabled={
-                        isUpdatingProfile ||
-                        !profileName.trim()
+                        isUpdatingProfile || !profileName.trim()
                       }
-                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {isUpdatingProfile
-                        ? "Saving..."
-                        : "Save name"}
+                      {isUpdatingProfile ? "Saving..." : "Save changes"}
                     </button>
                   </div>
                 </form>
               </section>
 
-              <div className="border-t border-gray-100" />
-
-              {/* Email address */}
-              <section>
-                <div className="mb-4">
-                  <div className="flex items-center gap-2">
-                    <Mail size={18} className="text-gray-500" />
+              {/* Email Address */}
+              <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+                <div className="mb-5 flex items-start gap-3">
+                  <div className="rounded-lg bg-gray-100 p-2 text-gray-600">
+                    <Mail size={18} />
+                  </div>
+                  <div>
                     <h3 className="text-sm font-semibold text-gray-900">
                       Email address
                     </h3>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Manage the email address associated with your account.
+                    </p>
                   </div>
-
-                  <p className="mt-1 text-xs text-gray-500">
-                    Your email is used for account communication and verification.
-                  </p>
                 </div>
 
-                {/* Current email */}
-                <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4">
+                <div className="flex flex-col justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4 sm:flex-row sm:items-center">
                   <div className="min-w-0">
                     <p className="text-xs font-medium text-gray-500">
                       Current email address
                     </p>
-
-                    <p className="mt-1 break-all text-sm font-medium text-gray-900">
+                    <p className="mt-1 break-all text-sm font-semibold text-gray-900">
                       {user?.email || ""}
                     </p>
                   </div>
@@ -1256,16 +1374,15 @@ export default function Navbar({
                     <button
                       type="button"
                       onClick={handleStartEmailEdit}
-                      className="shrink-0 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                      className="shrink-0 rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-xs font-semibold text-gray-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
                     >
-                      Edit email
+                      Change email
                     </button>
                   )}
                 </div>
 
-                {/* Email editing */}
                 {isEditingEmail && (
-                  <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/40 p-4">
+                  <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50/40 p-4">
                     {!isOTPSent ? (
                       <div className="space-y-4">
                         <div>
@@ -1275,7 +1392,6 @@ export default function Navbar({
                           >
                             New email address
                           </label>
-
                           <input
                             id="new-email"
                             type="email"
@@ -1287,7 +1403,7 @@ export default function Navbar({
                             }}
                             placeholder="name@example.com"
                             autoComplete="email"
-                            className={`w-full rounded-xl border bg-white px-4 py-3 text-sm outline-none transition placeholder:text-gray-400 focus:ring-4 focus:ring-blue-500/10 ${
+                            className={`w-full rounded-lg border bg-white px-3.5 py-2.5 text-sm outline-none transition focus:ring-4 focus:ring-blue-500/10 ${
                               emailError === "User already exists"
                                 ? "border-red-300 focus:border-red-500"
                                 : "border-gray-300 focus:border-blue-500"
@@ -1305,7 +1421,7 @@ export default function Navbar({
                         </div>
 
                         <p className="text-xs leading-5 text-gray-500">
-                          We'll send a six-digit verification code to your new email address.
+                          A six-digit verification code will be sent to your new email address.
                         </p>
 
                         <div className="flex justify-end gap-2">
@@ -1313,23 +1429,19 @@ export default function Navbar({
                             type="button"
                             onClick={handleCancelEmailEdit}
                             disabled={isSendingEmailOTP}
-                            className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:opacity-50"
+                            className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                           >
                             Cancel
                           </button>
-
                           <button
                             type="button"
                             onClick={() => void handleSendEmailOTP()}
                             disabled={
-                              isSendingEmailOTP ||
-                              !newEmail.trim()
+                              isSendingEmailOTP || !newEmail.trim()
                             }
-                            className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {isSendingEmailOTP
-                              ? "Sending..."
-                              : "Send OTP"}
+                            {isSendingEmailOTP ? "Sending..." : "Send OTP"}
                           </button>
                         </div>
                       </div>
@@ -1357,7 +1469,6 @@ export default function Navbar({
                           >
                             Verification code
                           </label>
-
                           <input
                             id="email-change-otp"
                             type="text"
@@ -1373,7 +1484,7 @@ export default function Navbar({
                             }
                             placeholder="Enter 6-digit OTP"
                             maxLength={6}
-                            className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-center text-lg font-semibold tracking-[0.5em] outline-none transition placeholder:text-sm placeholder:font-normal placeholder:tracking-normal focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                            className="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-center text-lg font-semibold tracking-[0.5em] outline-none transition placeholder:text-sm placeholder:font-normal placeholder:tracking-normal focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
                           />
                         </div>
 
@@ -1386,11 +1497,10 @@ export default function Navbar({
                             type="button"
                             onClick={handleCancelEmailEdit}
                             disabled={isVerifyingEmailOTP}
-                            className="rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:opacity-50"
+                            className="rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                           >
                             Cancel
                           </button>
-
                           <button
                             type="button"
                             onClick={() => {
@@ -1400,18 +1510,17 @@ export default function Navbar({
                               setEmailSuccess("");
                             }}
                             disabled={isVerifyingEmailOTP}
-                            className="rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:opacity-50"
+                            className="rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                           >
                             Change email
                           </button>
-
                           <button
                             type="submit"
                             disabled={
                               isVerifyingEmailOTP ||
                               emailOTP.trim().length !== 6
                             }
-                            className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {isVerifyingEmailOTP
                               ? "Verifying..."
@@ -1423,11 +1532,10 @@ export default function Navbar({
                   </div>
                 )}
 
-                {/* Show errors outside the new-email field, such as OTP errors. */}
                 {emailError && emailError !== "User already exists" && (
                   <div
                     role="alert"
-                    className="mt-3 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700"
+                    className="mt-3 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700"
                   >
                     <X size={17} className="mt-0.5 shrink-0" />
                     <p>{emailError}</p>
@@ -1437,21 +1545,291 @@ export default function Navbar({
                 {emailSuccess && (
                   <div
                     role="status"
-                    className="mt-3 flex items-start gap-2 rounded-xl border border-green-200 bg-green-50 px-3 py-3 text-sm text-green-700"
+                    className="mt-3 flex items-start gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2.5 text-sm text-green-700"
                   >
                     <Check size={17} className="mt-0.5 shrink-0" />
                     <p>{emailSuccess}</p>
                   </div>
                 )}
               </section>
+
+              {/* Change Password */}
+              <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+                <div className="mb-5 flex items-start gap-3">
+                  <div className="rounded-lg bg-gray-100 p-2 text-gray-600">
+                    <KeyRound size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900">
+                      Change password
+                    </h3>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Update your password securely using email verification.
+                    </p>
+                  </div>
+                </div>
+
+                <form
+                  onSubmit={handleChangePassword}
+                  className="space-y-4"
+                >
+                  <div>
+                    <label
+                      htmlFor="current-password"
+                      className="mb-2 block text-sm font-medium text-gray-700"
+                    >
+                      Current password
+                    </label>
+                    <input
+                      id="current-password"
+                      type="password"
+                      value={currentPassword}
+                      onChange={(event) => {
+                        setCurrentPassword(event.target.value);
+                        setPasswordError("");
+                        setPasswordSuccess("");
+                      }}
+                      placeholder="Enter current password"
+                      autoComplete="current-password"
+                      required
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="new-password"
+                      className="mb-2 block text-sm font-medium text-gray-700"
+                    >
+                      New password
+                    </label>
+                    <input
+                      id="new-password"
+                      type="password"
+                      value={newPassword}
+                      onChange={(event) => {
+                        setNewPassword(event.target.value);
+                        setPasswordError("");
+                        setPasswordSuccess("");
+                      }}
+                      placeholder="Enter new password"
+                      autoComplete="new-password"
+                      required
+                      minLength={8}
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                    />
+                    <p className="mt-2 text-xs leading-5 text-gray-500">
+                      Use at least 8 characters, including an uppercase letter, a number, and a special character.
+                    </p>
+                  </div>
+
+                  {passwordError && (
+                    <div
+                      role="alert"
+                      className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700"
+                    >
+                      <X size={17} className="mt-0.5 shrink-0" />
+                      <p>{passwordError}</p>
+                    </div>
+                  )}
+
+                  {passwordSuccess && (
+                    <div
+                      role="status"
+                      className="flex items-start gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2.5 text-sm text-green-700"
+                    >
+                      <Check size={17} className="mt-0.5 shrink-0" />
+                      <p>{passwordSuccess}</p>
+                    </div>
+                  )}
+
+                  <div className="flex justify-end">
+                    <button
+                      type="submit"
+                      disabled={
+                        isSendingPasswordOTP ||
+                        !currentPassword ||
+                        !newPassword
+                      }
+                      className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isSendingPasswordOTP
+                        ? "Sending OTP..."
+                        : "Continue"}
+                    </button>
+                  </div>
+                </form>
+              </section>
             </div>
 
-            {/* Footer */}
-            <div className="border-t border-gray-100 bg-gray-50/80 px-6 py-4">
+            <div className="border-t border-gray-200 bg-white px-6 py-4">
               <p className="text-xs text-gray-500">
-                Your account details are kept up to date.
+                Your account information is protected and kept up to date.
               </p>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Separate Password OTP Popup */}
+      {showPasswordOTPModal && (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-sm"
+          onClick={handleClosePasswordOTPModal}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="password-otp-title"
+            className="w-full max-w-md overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                  <Mail size={20} />
+                </div>
+                <div>
+                  <h2
+                    id="password-otp-title"
+                    className="text-base font-semibold text-gray-900"
+                  >
+                    Verify your email
+                  </h2>
+                  <p className="mt-0.5 text-xs text-gray-500">
+                    Password change verification
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleClosePasswordOTPModal}
+                disabled={
+                  isVerifyingPasswordOTP || isSendingPasswordOTP
+                }
+                aria-label="Close OTP popup"
+                className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
+              >
+                <X size={19} />
+              </button>
+            </div>
+
+            <form
+              onSubmit={handleVerifyChangePasswordOTP}
+              className="space-y-5 p-6"
+            >
+              <div>
+                <p className="mb-1 text-xs font-medium text-gray-500">
+                  Verification email sent to
+                </p>
+                <p className="break-all text-sm font-semibold text-gray-900">
+                  {user?.email}
+                </p>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="password-change-otp"
+                  className="mb-2 block text-sm font-medium text-gray-700"
+                >
+                  Enter 6-digit OTP
+                </label>
+                <input
+                  id="password-change-otp"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  value={passwordOTP}
+                  onChange={(event) => {
+                    setPasswordOTP(
+                      event.target.value
+                        .replace(/\D/g, "")
+                        .slice(0, 6)
+                    );
+                    setPasswordError("");
+                  }}
+                  placeholder="000000"
+                  maxLength={6}
+                  required
+                  autoFocus
+                  className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-center text-2xl font-semibold tracking-[0.6em] outline-none transition placeholder:text-gray-300 placeholder:tracking-[0.6em] focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                />
+                <p className="mt-2 text-xs text-gray-500">
+                  This verification code is valid for 10 minutes.
+                </p>
+              </div>
+
+              {passwordError && (
+                <div
+                  role="alert"
+                  className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700"
+                >
+                  <X size={17} className="mt-0.5 shrink-0" />
+                  <p>{passwordError}</p>
+                </div>
+              )}
+
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => void handleChangePassword()}
+                  disabled={
+                    isSendingPasswordOTP || isVerifyingPasswordOTP
+                  }
+                  className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isSendingPasswordOTP ? "Resending..." : "Resend OTP"}
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={
+                    isVerifyingPasswordOTP ||
+                    passwordOTP.trim().length !== 6
+                  }
+                  className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isVerifyingPasswordOTP
+                    ? "Verifying..."
+                    : "Verify and change password"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Temporary Password OTP Success Toast */}
+      {showPasswordOTPSuccessToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed right-5 top-5 z-[110] w-[min(400px,calc(100vw-2.5rem))] animate-in slide-in-from-top-3 fade-in duration-300"
+        >
+          <div className="flex items-start gap-3 rounded-xl border border-green-200 bg-white p-4 shadow-xl">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-green-100 text-green-700">
+              <Mail size={20} />
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-gray-900">
+                OTP sent to your registered email
+              </p>
+
+              <p className="mt-1 text-sm leading-5 text-gray-600">
+                Please check your inbox and enter the six-digit verification code.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowPasswordOTPSuccessToast(false)}
+              aria-label="Dismiss notification"
+              className="shrink-0 rounded-md p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
+            >
+              <X size={17} />
+            </button>
           </div>
         </div>
       )}
@@ -1477,7 +1855,6 @@ export default function Navbar({
                 >
                   Create Task
                 </h2>
-
                 <p className="mt-1 text-sm text-gray-500">
                   Enter the details for your new task.
                 </p>
@@ -1511,13 +1888,10 @@ export default function Navbar({
                 >
                   Task Title
                 </label>
-
                 <input
                   id="task-title"
                   value={title}
-                  onChange={(event) =>
-                    setTitle(event.target.value)
-                  }
+                  onChange={(event) => setTitle(event.target.value)}
                   placeholder="Enter task title"
                   required
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
@@ -1531,7 +1905,6 @@ export default function Navbar({
                 >
                   Description
                 </label>
-
                 <textarea
                   id="task-description"
                   value={description}
@@ -1545,7 +1918,6 @@ export default function Navbar({
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                {/* Task Type */}
                 <div>
                   <label
                     htmlFor="task-type"
@@ -1553,7 +1925,6 @@ export default function Navbar({
                   >
                     Task Type
                   </label>
-
                   <div className="relative">
                     <select
                       id="task-type"
@@ -1568,7 +1939,6 @@ export default function Navbar({
                       <option value="Task">Task</option>
                       <option value="Bug">Bug</option>
                     </select>
-
                     <ChevronDown
                       size={18}
                       className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-600"
@@ -1576,7 +1946,6 @@ export default function Navbar({
                   </div>
                 </div>
 
-                {/* Priority */}
                 <div>
                   <label
                     htmlFor="task-priority"
@@ -1584,7 +1953,6 @@ export default function Navbar({
                   >
                     Priority
                   </label>
-
                   <div className="relative">
                     <select
                       id="task-priority"
@@ -1600,7 +1968,6 @@ export default function Navbar({
                       <option value="Medium">Medium</option>
                       <option value="High">High</option>
                     </select>
-
                     <ChevronDown
                       size={18}
                       className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-600"
@@ -1609,7 +1976,6 @@ export default function Navbar({
                 </div>
               </div>
 
-              {/* Due Date */}
               <div>
                 <label
                   htmlFor="dueDate"
@@ -1617,7 +1983,6 @@ export default function Navbar({
                 >
                   Due Date
                 </label>
-
                 <input
                   id="dueDate"
                   type="date"
@@ -1629,7 +1994,6 @@ export default function Navbar({
                 />
               </div>
 
-              {/* Assignee */}
               <div>
                 <label
                   htmlFor="task-assignee"
@@ -1637,7 +2001,6 @@ export default function Navbar({
                 >
                   Assignee
                 </label>
-
                 <div className="relative">
                   <select
                     id="task-assignee"
@@ -1665,16 +2028,12 @@ export default function Navbar({
                     </option>
 
                     {projectMembers.map((member) => (
-                      <option
-                        key={member._id}
-                        value={member._id}
-                      >
+                      <option key={member._id} value={member._id}>
                         {member.name || member.email || "User"}
                         {member.email ? ` (${member.email})` : ""}
                       </option>
                     ))}
                   </select>
-
                   <ChevronDown
                     size={18}
                     className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-600"
@@ -1692,9 +2051,6 @@ export default function Navbar({
                 )}
               </div>
 
-              {/* No Parent Task field here. Parent Epic is selected
-                  later from the Task Details panel. */}
-
               <div className="flex justify-end gap-2 border-t border-gray-100 pt-3">
                 <button
                   type="button"
@@ -1704,7 +2060,6 @@ export default function Navbar({
                 >
                   Cancel
                 </button>
-
                 <button
                   type="submit"
                   disabled={cannotCreate}

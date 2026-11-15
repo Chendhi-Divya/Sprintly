@@ -1,4 +1,3 @@
-
 import mongoose, { Schema, Document } from "mongoose";
 
 export interface ITaskAttachment {
@@ -25,6 +24,7 @@ interface ITask extends Document {
   organization: string;
   parentTask?: mongoose.Types.ObjectId;
   sprint?: mongoose.Types.ObjectId;
+  position: number;
   dueDate?: Date;
   attachments: ITaskAttachment[];
 }
@@ -122,6 +122,10 @@ const taskSchema = new Schema<ITask>(
       ref: "Sprint",
       default: undefined,
     },
+    position: {
+      type: Number,
+      default: 0,
+    },
     dueDate: {
       type: Date,
     },
@@ -133,6 +137,6 @@ const taskSchema = new Schema<ITask>(
   { timestamps: true }
 );
 
-taskSchema.index({ project: 1, sprint: 1 });
+taskSchema.index({ project: 1, sprint: 1, position: 1 });
 
 export default mongoose.model<ITask>("Task", taskSchema);

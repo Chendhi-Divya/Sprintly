@@ -218,19 +218,17 @@ export default function TaskBoard({
   return (
     <div className="min-h-screen bg-white p-6 text-gray-900">
       {/* Header */}
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold">
-          {activeView === "List"
-            ? "Task List"
-            : activeView === "Sprints"
-              ? "Project Sprints"
-              : "Task Board"}
-        </h2>
+      {activeView !== "Sprints" && (
+        <div className="mb-6">
+          <h2 className="text-2xl font-bold">
+            {activeView === "List" ? "Task List" : "Task Board"}
+          </h2>
 
-        <p className="mt-1 text-sm text-gray-500">
-          Manage and track your tasks.
-        </p>
-      </div>
+          <p className="mt-1 text-sm text-gray-500">
+            Manage and track your tasks.
+          </p>
+        </div>
+      )}
 
       {/* Error message */}
       {message && (

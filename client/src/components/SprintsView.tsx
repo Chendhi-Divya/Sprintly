@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   CalendarDays,
   ChevronDown,
@@ -9,6 +9,7 @@ import {
   Pencil,
   UserRound,
   X,
+  Check,
 } from "lucide-react";
 
 import {
@@ -16,6 +17,7 @@ import {
   useCreateSprintMutation,
   useDeleteSprintMutation,
   useGetProjectSprintsQuery,
+  useGetProjectMembersQuery,
   useSetTaskSprintMutation,
   useStartSprintMutation,
   useUpdateSprintMutation,
@@ -23,6 +25,7 @@ import {
   type ProjectSprint,
   type SprintStatus,
   type Task,
+  type TaskPriority,
   type TaskStatus,
 } from "../services/taskApi";
 
@@ -31,6 +34,27 @@ type SprintsViewProps = {
   searchText: string;
   selectedAssigneeId: string;
   onTaskOpen: (taskId: string) => void;
+};
+
+type DropPosition = "before" | "after";
+
+type DropTarget = {
+  taskId: string;
+  position: DropPosition;
+  destinationId: string;
+};
+
+type ProjectMember = {
+  _id: string;
+  name: string;
+  email: string;
+};
+
+type EditableTaskFields = {
+  title?: string;
+  priority?: TaskPriority;
+  assignee?: string | null;
+  dueDate?: string | null;
 };
 
 const statusStyles: Record<SprintStatus, string> = {
@@ -44,6 +68,12 @@ const taskStatuses: TaskStatus[] = [
   "In Progress",
   "In Review",
   "Done",
+];
+
+const taskPriorities: TaskPriority[] = [
+  "Low",
+  "Medium",
+  "High",
 ];
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -130,10 +160,9 @@ function isTaskOverdue(task: Task) {
   return dueDate < today;
 }
 
-// Shared column headings for Sprint tasks and Backlog.
 function TaskColumnHeader() {
   return (
-    <div className="grid min-w-[850px] grid-cols-[minmax(260px,1fr)_150px_100px_150px_140px] items-center gap-4 border-b border-gray-100 bg-gray-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+    <div className="grid min-w-[950px] grid-cols-[minmax(240px,1fr)_145px_110px_165px_145px] items-center gap-4 border-b border-gray-100 bg-gray-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
       <span>Task</span>
       <span>Status</span>
       <span>Priority</span>
@@ -143,23 +172,225 @@ function TaskColumnHeader() {
   );
 }
 
+// ==========================================
+// EDITABLE SPRINT DETAILS
+// ==========================================
+
+function EditableSprintDetails({
+  sprint,
+  onUpdate,
+  disabled,
+}: {
+  sprint: ProjectSprint;
+  onUpdate: (
+    updates: {
+      title?: string;
+      description?: string;
+      startDate?: string | null;
+      endDate?: string | null;
+    }
+  ) => void;
+  disabled: boolean;
+}) {
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [editingDescription, setEditingDescription] = useState(false);
+
+  const [title, setTitle] = useState(sprint.title);
+  const [description, setDescription] = useState(
+    sprint.description ?? ""
+  );
+
+  useEffect(() => {
+    setTitle(sprint.title);
+    setDescription(sprint.description ?? "");
+  }, [sprint.title, sprint.description]);
+
+  function saveTitle() {
+    const updatedTitle = title.trim();
+
+    setEditingTitle(false);
+
+    if (updatedTitle && updatedTitle !== sprint.title) {
+      onUpdate({ title: updatedTitle });
+    } else {
+      setTitle(sprint.title);
+    }
+  }
+
+  function saveDescription() {
+    setEditingDescription(false);
+
+    if (description !== (sprint.description ?? "")) {
+      onUpdate({ description: description.trim() });
+    }
+  }
+
+  return (
+    <div className="min-w-0 space-y-2">
+      <div className="flex min-w-0 items-center gap-2">
+        {editingTitle ? (
+          <input
+            autoFocus
+            value={title}
+            disabled={disabled}
+            onChange={(event) => setTitle(event.target.value)}
+            onBlur={saveTitle}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.currentTarget.blur();
+              }
+
+              if (event.key === "Escape") {
+                setTitle(sprint.title);
+                setEditingTitle(false);
+              }
+            }}
+            className="min-w-[120px] max-w-[280px] rounded-md border border-blue-300 px-2 py-1 text-sm font-semibold text-gray-900 outline-none focus:ring-2 focus:ring-blue-100"
+          />
+        ) : (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => setEditingTitle(true)}
+            className="group inline-flex min-w-0 items-center gap-2 text-left"
+            title="Edit sprint title"
+          >
+            <span className="truncate font-semibold text-gray-900">
+              {sprint.title}
+            </span>
+            <Pencil
+              size={13}
+              className="shrink-0 text-gray-400 opacity-0 transition group-hover:opacity-100"
+            />
+          </button>
+        )}
+
+        <span
+          className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles[sprint.status]}`}
+        >
+          {sprint.status}
+        </span>
+      </div>
+
+      <div className="flex min-w-0 items-center gap-2">
+        {editingDescription ? (
+          <textarea
+            autoFocus
+            rows={2}
+            value={description}
+            disabled={disabled}
+            onChange={(event) => setDescription(event.target.value)}
+            onBlur={saveDescription}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                setDescription(sprint.description ?? "");
+                setEditingDescription(false);
+              }
+            }}
+            placeholder="Add sprint description..."
+            className="w-full max-w-md resize-y rounded-md border border-blue-300 px-2 py-1 text-xs text-gray-600 outline-none focus:ring-2 focus:ring-blue-100"
+          />
+        ) : (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => setEditingDescription(true)}
+            className="group inline-flex min-w-0 items-center gap-2 text-left"
+            title="Edit sprint description"
+          >
+            <span className="truncate text-xs text-gray-500">
+              {sprint.description || "Add description"}
+            </span>
+            <Pencil
+              size={12}
+              className="shrink-0 text-gray-400 opacity-0 transition group-hover:opacity-100"
+            />
+          </button>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
+        <label className="inline-flex items-center gap-1.5">
+          <CalendarDays size={13} />
+          <span>From</span>
+          <input
+            type="date"
+            value={getDateInputValue(sprint.startDate)}
+            disabled={disabled}
+            onChange={(event) =>
+              onUpdate({
+                startDate: event.target.value || null,
+              })
+            }
+            className="max-w-[135px] rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 outline-none focus:border-blue-500 disabled:opacity-50"
+          />
+        </label>
+
+        <label className="inline-flex items-center gap-1.5">
+          <span>To</span>
+          <input
+            type="date"
+            value={getDateInputValue(sprint.endDate)}
+            min={getDateInputValue(sprint.startDate) || undefined}
+            disabled={disabled}
+            onChange={(event) =>
+              onUpdate({
+                endDate: event.target.value || null,
+              })
+            }
+            className="max-w-[135px] rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 outline-none focus:border-blue-500 disabled:opacity-50"
+          />
+        </label>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// TASK ROW
+// ==========================================
+
 function TaskRow({
   task,
+  members,
   onTaskOpen,
+  onTaskUpdate,
   onStatusChange,
   updatingStatus,
   moving,
   onDragStart,
+  onDragEnd,
+  onTaskDragOver,
+  onTaskDrop,
+  dropPosition,
 }: {
   task: Task;
+  members: ProjectMember[];
   onTaskOpen: (taskId: string) => void;
+  onTaskUpdate: (
+    taskId: string,
+    updates: EditableTaskFields
+  ) => void;
   onStatusChange: (taskId: string, status: TaskStatus) => void;
   updatingStatus: boolean;
   moving: boolean;
   onDragStart: (taskId: string) => void;
+  onDragEnd: () => void;
+  onTaskDragOver: (
+    event: React.DragEvent<HTMLDivElement>,
+    taskId: string
+  ) => void;
+  onTaskDrop: (
+    event: React.DragEvent<HTMLDivElement>,
+    taskId: string
+  ) => void;
+  dropPosition: DropPosition | null;
 }) {
   const assigneeName = getAssigneeName(task);
   const overdue = isTaskOverdue(task);
+
+  const selectClass =
+    "w-full min-w-0 cursor-pointer appearance-none rounded-md border border-gray-200 bg-white py-2 pl-3 pr-9 text-xs font-medium text-gray-700 outline-none transition hover:border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50";
 
   return (
     <div
@@ -169,26 +400,35 @@ function TaskRow({
         event.dataTransfer.setData("text/plain", task._id);
         onDragStart(task._id);
       }}
-      className="grid min-w-[850px] grid-cols-[minmax(260px,1fr)_150px_100px_150px_140px] items-center gap-4 px-5 py-3 transition hover:bg-gray-50"
+      onDragEnd={onDragEnd}
+      onDragOver={(event) => onTaskDragOver(event, task._id)}
+      onDrop={(event) => onTaskDrop(event, task._id)}
+      className={`relative grid min-w-[950px] grid-cols-[minmax(240px,1fr)_145px_110px_165px_145px] items-center gap-4 border-b border-gray-100 px-5 py-3 transition hover:bg-gray-50 ${
+        dropPosition === "before"
+          ? "border-t-2 border-t-blue-500"
+          : dropPosition === "after"
+            ? "border-b-2 border-b-blue-500"
+            : ""
+      }`}
     >
-      {/* Task */}
-      <button
-        type="button"
-        onClick={() => onTaskOpen(task._id)}
-        className="min-w-0 text-left"
-      >
-        <div className="flex min-w-0 items-center gap-2">
+      {/* TASK TITLE */}
+      <div className="flex min-w-0 items-center">
+        <button
+          type="button"
+          onClick={() => onTaskOpen(task._id)}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        >
           <span className="shrink-0 font-mono text-xs font-semibold text-blue-600">
             {task.taskKey ?? "Task"}
           </span>
 
-          <span className="truncate text-sm font-medium text-gray-800 hover:text-blue-600">
+          <span className="truncate text-sm font-medium text-gray-800 transition hover:text-blue-600">
             {task.title}
           </span>
-        </div>
-      </button>
+        </button>
+      </div>
 
-      {/* Editable Status */}
+      {/* STATUS */}
       <div className="relative">
         <select
           value={task.status}
@@ -198,7 +438,7 @@ function TaskRow({
           }
           onClick={(event) => event.stopPropagation()}
           onMouseDown={(event) => event.stopPropagation()}
-          className="w-full cursor-pointer appearance-none rounded-md border border-gray-200 bg-white py-1.5 pl-3 pr-9 text-xs font-medium text-gray-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+          className={selectClass}
           aria-label={`Change status for ${task.title}`}
         >
           {taskStatuses.map((status) => (
@@ -215,43 +455,114 @@ function TaskRow({
         />
       </div>
 
-      {/* Priority */}
-      <div>
-        <span className="text-xs font-medium text-gray-700">
-          {task.priority}
-        </span>
+      {/* PRIORITY */}
+      <div className="relative">
+        <select
+          value={task.priority}
+          disabled={moving}
+          onChange={(event) =>
+            onTaskUpdate(task._id, {
+              priority: event.target.value as TaskPriority,
+            })
+          }
+          onClick={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          className={selectClass}
+          aria-label={`Change priority for ${task.title}`}
+        >
+          {taskPriorities.map((priority) => (
+            <option key={priority} value={priority}>
+              {priority}
+            </option>
+          ))}
+        </select>
+
+        <ChevronDown
+          size={14}
+          aria-hidden="true"
+          className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
+        />
       </div>
 
-      {/* Assignee */}
+      {/* ASSIGNEE */}
       <div className="flex min-w-0 items-center gap-2">
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[10px] font-semibold text-blue-700">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[10px] font-semibold text-blue-700">
           {assigneeName === "Unassigned" ? (
-            <UserRound size={14} />
+            <UserRound size={15} />
           ) : (
             getInitials(assigneeName)
           )}
         </div>
 
-        <span className="truncate text-xs text-gray-600">
-          {assigneeName}
-        </span>
+        <div className="relative min-w-0 flex-1">
+          <select
+            value={getAssigneeId(task)}
+            disabled={moving}
+            onChange={(event) =>
+              onTaskUpdate(task._id, {
+                assignee: event.target.value || null,
+              })
+            }
+            onClick={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
+            className="w-full min-w-0 cursor-pointer appearance-none rounded-md border border-gray-200 bg-white py-2 pl-2 pr-7 text-xs text-gray-700 outline-none transition hover:border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label={`Change assignee for ${task.title}`}
+          >
+            <option value="">Unassigned</option>
+
+            {members.map((member) => (
+              <option key={member._id} value={member._id}>
+                {member.name || member.email}
+              </option>
+            ))}
+
+            {getAssigneeId(task) &&
+              !members.some(
+                (member) => member._id === getAssigneeId(task)
+              ) && (
+                <option value={getAssigneeId(task)}>
+                  {assigneeName}
+                </option>
+              )}
+          </select>
+
+          <ChevronDown
+            size={13}
+            aria-hidden="true"
+            className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-gray-500"
+          />
+        </div>
       </div>
 
-      {/* Due date */}
+      {/* DUE DATE */}
       <div
-        className={`flex items-center gap-2 text-xs ${
+        className={`flex min-w-0 items-center gap-2 text-xs ${
           overdue ? "font-semibold text-red-600" : "text-gray-500"
         }`}
       >
         <CalendarDays size={14} className="shrink-0" />
 
-        <span>
-          {task.dueDate ? formatDate(task.dueDate) : "No due date"}
-        </span>
+        <input
+          type="date"
+          value={getDateInputValue(task.dueDate)}
+          disabled={moving}
+          onChange={(event) =>
+            onTaskUpdate(task._id, {
+              dueDate: event.target.value || null,
+            })
+          }
+          onClick={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          className="min-w-0 w-full cursor-pointer rounded-md border border-gray-200 bg-white px-2 py-2 text-xs text-gray-600 outline-none transition hover:border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:opacity-50"
+          aria-label={`Change due date for ${task.title}`}
+        />
       </div>
     </div>
   );
 }
+// ==========================================
+// MAIN SPRINTS VIEW
+// ==========================================
 
 export default function SprintsView({
   projectId,
@@ -259,9 +570,20 @@ export default function SprintsView({
   selectedAssigneeId,
   onTaskOpen,
 }: SprintsViewProps) {
-  const { data, isLoading, isError } = useGetProjectSprintsQuery(projectId, {
+  const {
+    data,
+    isLoading,
+    isError,
+    refetch: refetchSprints,
+  } = useGetProjectSprintsQuery(projectId, {
     skip: !projectId,
   });
+
+  const { data: membersData } = useGetProjectMembersQuery(projectId, {
+    skip: !projectId,
+  });
+
+  const members: ProjectMember[] = membersData?.members ?? [];
 
   const [createSprint, { isLoading: isCreating }] =
     useCreateSprintMutation();
@@ -302,16 +624,17 @@ export default function SprintsView({
 
   const [moveDestinationId, setMoveDestinationId] = useState("");
   const [draggedTaskId, setDraggedTaskId] = useState("");
+  const [dragOverDestinationId, setDragOverDestinationId] = useState<
+    string | null
+  >(null);
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
 
   const sprints = data?.sprints ?? [];
 
-  // Hide completed sprints from this page.
-  // Their records and task associations remain saved.
   const visibleSprints = sprints.filter(
     (sprint) => sprint.status !== "Completed"
   );
 
-  // Show Active sprint first, followed by Planning sprints.
   const orderedSprints = [...visibleSprints].sort((a, b) => {
     const rank: Record<SprintStatus, number> = {
       Active: 0,
@@ -348,6 +671,12 @@ export default function SprintsView({
     });
   }
 
+  function resetDragState() {
+    setDraggedTaskId("");
+    setDragOverDestinationId(null);
+    setDropTarget(null);
+  }
+
   function resetForm() {
     setName("");
     setGoal("");
@@ -366,6 +695,83 @@ export default function SprintsView({
     setEditingSprintId(sprint._id);
     setShowForm(true);
     setErrorMessage("");
+  }
+
+  // ==========================================
+  // UPDATE SPRINT DETAILS
+  // ==========================================
+
+  async function handleInlineSprintUpdate(
+    sprint: ProjectSprint,
+    updates: {
+      title?: string;
+      description?: string;
+      startDate?: string | null;
+      endDate?: string | null;
+    }
+  ) {
+    setErrorMessage("");
+
+    const updatedStartDate =
+      updates.startDate !== undefined
+        ? updates.startDate
+        : getDateInputValue(sprint.startDate);
+
+    const updatedEndDate =
+      updates.endDate !== undefined
+        ? updates.endDate
+        : getDateInputValue(sprint.endDate);
+
+    if (
+      updatedStartDate &&
+      updatedEndDate &&
+      new Date(updatedEndDate).getTime() <
+        new Date(updatedStartDate).getTime()
+    ) {
+      setErrorMessage("End date must be after or equal to the start date.");
+      await refetchSprints();
+      return;
+    }
+
+    try {
+      await updateSprint({
+        projectId,
+        sprintId: sprint._id,
+        ...updates,
+      }).unwrap();
+
+      await refetchSprints();
+    } catch (error: unknown) {
+      setErrorMessage(
+        getErrorMessage(error, "Could not update sprint.")
+      );
+      await refetchSprints();
+    }
+  }
+
+  // ==========================================
+  // UPDATE TASK DETAILS
+  // ==========================================
+
+  async function handleTaskUpdate(
+    taskId: string,
+    updates: EditableTaskFields
+  ) {
+    setErrorMessage("");
+
+    try {
+      await updateTask({
+        id: taskId,
+        ...updates,
+      }).unwrap();
+
+      await refetchSprints();
+    } catch (error: unknown) {
+      setErrorMessage(
+        getErrorMessage(error, "Could not update task.")
+      );
+      await refetchSprints();
+    }
   }
 
   async function handleCreateSprint(
@@ -404,6 +810,7 @@ export default function SprintsView({
       }
 
       resetForm();
+      await refetchSprints();
     } catch (error: unknown) {
       setErrorMessage(
         getErrorMessage(
@@ -420,23 +827,14 @@ export default function SprintsView({
     taskId: string,
     status: TaskStatus
   ) {
-    setErrorMessage("");
-
-    try {
-      await updateTask({
-        id: taskId,
-        status,
-      }).unwrap();
-    } catch (error: unknown) {
-      setErrorMessage(
-        getErrorMessage(error, "Could not update task status.")
-      );
-    }
+    await handleTaskUpdate(taskId, { status });
   }
 
   async function handleMoveTask(
     taskId: string,
-    sprintId: string | null
+    sprintId: string | null,
+    targetTaskId?: string,
+    position?: DropPosition
   ) {
     setErrorMessage("");
 
@@ -445,28 +843,137 @@ export default function SprintsView({
         projectId,
         taskId,
         sprintId,
+        ...(targetTaskId ? { targetTaskId } : {}),
+        ...(position ? { position } : {}),
       }).unwrap();
+
+      await refetchSprints();
     } catch (error: unknown) {
       setErrorMessage(
         getErrorMessage(error, "Could not update sprint task.")
       );
+    } finally {
+      resetDragState();
     }
   }
 
-  function handleDrop(
-    event: React.DragEvent,
-    sprintId: string | null
+  function handleContainerDragOver(
+    event: React.DragEvent<HTMLDivElement>,
+    destinationId: string | null
   ) {
     event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+
+    setDragOverDestinationId(destinationId ?? "__backlog__");
+    setDropTarget(null);
+  }
+
+  function handleTaskDragOver(
+    event: React.DragEvent<HTMLDivElement>,
+    taskId: string,
+    destinationId: string | null
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!draggedTaskId || draggedTaskId === taskId) return;
+
+    event.dataTransfer.dropEffect = "move";
+
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const midpoint = bounds.top + bounds.height / 2;
+    const position: DropPosition =
+      event.clientY < midpoint ? "before" : "after";
+
+    setDragOverDestinationId(destinationId ?? "__backlog__");
+    setDropTarget({
+      taskId,
+      position,
+      destinationId: destinationId ?? "__backlog__",
+    });
+  }
+
+  async function handleTaskDrop(
+    event: React.DragEvent<HTMLDivElement>,
+    targetTaskId: string,
+    destinationSprintId: string | null
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
 
     const taskId =
       event.dataTransfer.getData("text/plain") || draggedTaskId;
 
-    setDraggedTaskId("");
-
-    if (taskId) {
-      void handleMoveTask(taskId, sprintId);
+    if (!taskId || taskId === targetTaskId || isMovingTask) {
+      resetDragState();
+      return;
     }
+
+    const destinationSprint = destinationSprintId
+      ? sprints.find((sprint) => sprint._id === destinationSprintId)
+      : null;
+
+    if (destinationSprint?.status === "Completed") {
+      resetDragState();
+      return;
+    }
+
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const midpoint = bounds.top + bounds.height / 2;
+    const position: DropPosition =
+      event.clientY < midpoint ? "before" : "after";
+
+    await handleMoveTask(
+      taskId,
+      destinationSprintId,
+      targetTaskId,
+      position
+    );
+  }
+
+  async function handleDropOnEmptyArea(
+    event: React.DragEvent<HTMLDivElement>,
+    destinationSprintId: string | null
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const taskId =
+      event.dataTransfer.getData("text/plain") || draggedTaskId;
+
+    if (!taskId || isMovingTask) {
+      resetDragState();
+      return;
+    }
+
+    const sourceSprint = sprints.find((sprint) =>
+      sprint.tasks.some((task) => task._id === taskId)
+    );
+
+    const isInBacklog = (data?.backlog ?? []).some(
+      (task) => task._id === taskId
+    );
+
+    const sourceKey =
+      sourceSprint?._id ?? (isInBacklog ? "__backlog__" : null);
+
+    const destinationKey = destinationSprintId ?? "__backlog__";
+
+    if (sourceKey === destinationKey) {
+      resetDragState();
+      return;
+    }
+
+    const destinationSprint = destinationSprintId
+      ? sprints.find((sprint) => sprint._id === destinationSprintId)
+      : null;
+
+    if (destinationSprint?.status === "Completed") {
+      resetDragState();
+      return;
+    }
+
+    await handleMoveTask(taskId, destinationSprintId);
   }
 
   async function handleStart(sprint: ProjectSprint) {
@@ -477,6 +984,8 @@ export default function SprintsView({
         projectId,
         sprintId: sprint._id,
       }).unwrap();
+
+      await refetchSprints();
     } catch (error: unknown) {
       setErrorMessage(
         getErrorMessage(error, "Could not start sprint.")
@@ -499,6 +1008,7 @@ export default function SprintsView({
 
       setSprintToComplete(null);
       setMoveDestinationId("");
+      await refetchSprints();
     } catch (error: unknown) {
       setErrorMessage(
         getErrorMessage(error, "Could not complete sprint.")
@@ -521,6 +1031,7 @@ export default function SprintsView({
 
       setSprintToDelete(null);
       setMoveDestinationId("");
+      await refetchSprints();
     } catch (error: unknown) {
       setErrorMessage(
         getErrorMessage(error, "Could not delete sprint.")
@@ -551,10 +1062,9 @@ export default function SprintsView({
 
   return (
     <section className="w-full space-y-5">
-      {/* Project Sprints heading and New Sprint button */}
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-lg font-semibold text-gray-900">
-         
+          Project Sprints
         </h2>
 
         <button
@@ -588,7 +1098,6 @@ export default function SprintsView({
         </p>
       )}
 
-      {/* Create / Edit Sprint form */}
       {showForm && (
         <form
           onSubmit={handleCreateSprint}
@@ -679,7 +1188,6 @@ export default function SprintsView({
         </form>
       )}
 
-      {/* Active and Planning sprint cards only */}
       {orderedSprints.length === 0 ? (
         <div className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">
           No active or planning sprints. Create a new sprint to get started.
@@ -688,45 +1196,24 @@ export default function SprintsView({
         <div className="w-full space-y-4">
           {orderedSprints.map((sprint) => {
             const visibleTasks = filterTasks(sprint.tasks);
-
-            const isBusy =
-              isStarting || isCompleting || isDeleting;
+            const isBusy = isStarting || isCompleting || isDeleting;
 
             return (
               <section
                 key={sprint._id}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => {
-                  handleDrop(event, sprint._id);
-                }}
-                className={`w-full overflow-hidden rounded-xl border bg-white ${
-                  draggedTaskId
-                    ? "border-blue-300"
-                    : "border-gray-200"
-                }`}
+                className="w-full overflow-hidden rounded-xl border border-gray-200 bg-white"
               >
-                {/* Sprint header */}
                 <header className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4">
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-                    <h3 className="font-semibold text-gray-900">
-                      {sprint.title}
-                    </h3>
-
-                    <span
-                      className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles[sprint.status]}`}
-                    >
-                      {sprint.status}
-                    </span>
-
-                    <span className="flex items-center gap-1.5 text-xs text-gray-500">
-                      <CalendarDays size={14} />
-                      {formatDate(sprint.startDate)}
-                      <span>–</span>
-                      {formatDate(sprint.endDate)}
-                    </span>
+                  <div className="min-w-0 flex-1">
+                    <EditableSprintDetails
+                      sprint={sprint}
+                      onUpdate={(updates) =>
+                        void handleInlineSprintUpdate(sprint, updates)
+                      }
+                      disabled={isBusy || isUpdating}
+                    />
                   </div>
 
-                  {/* Sprint actions */}
                   <div className="flex shrink-0 items-center gap-2">
                     {sprint.status === "Planning" && (
                       <button
@@ -808,11 +1295,32 @@ export default function SprintsView({
                   </div>
                 </header>
 
-                {/* Sprint task columns */}
                 <div className="w-full overflow-x-auto">
                   <TaskColumnHeader />
 
-                  <div className="divide-y divide-gray-100">
+                  <div
+                    onDragOver={(event) =>
+                      handleContainerDragOver(event, sprint._id)
+                    }
+                    onDragLeave={(event) => {
+                      if (
+                        !event.currentTarget.contains(
+                          event.relatedTarget as Node
+                        )
+                      ) {
+                        setDragOverDestinationId(null);
+                        setDropTarget(null);
+                      }
+                    }}
+                    onDrop={(event) =>
+                      void handleDropOnEmptyArea(event, sprint._id)
+                    }
+                    className={`min-h-16 divide-y divide-gray-100 border-t-2 transition-colors ${
+                      dragOverDestinationId === sprint._id
+                        ? "border-blue-500"
+                        : "border-transparent"
+                    }`}
+                  >
                     {visibleTasks.length === 0 ? (
                       <p className="m-3 rounded-lg border border-dashed border-gray-200 p-5 text-center text-sm text-gray-500">
                         {draggedTaskId
@@ -826,11 +1334,29 @@ export default function SprintsView({
                         <TaskRow
                           key={task._id}
                           task={task}
+                          members={members}
                           onTaskOpen={onTaskOpen}
+                          onTaskUpdate={handleTaskUpdate}
                           onStatusChange={handleStatusChange}
                           updatingStatus={isUpdatingTask}
                           moving={isMovingTask}
-                          onDragStart={setDraggedTaskId}
+                          onDragStart={(taskId) => {
+                            setDraggedTaskId(taskId);
+                            setDropTarget(null);
+                          }}
+                          onDragEnd={resetDragState}
+                          onTaskDragOver={(event, taskId) =>
+                            handleTaskDragOver(event, taskId, sprint._id)
+                          }
+                          onTaskDrop={(event, taskId) =>
+                            void handleTaskDrop(event, taskId, sprint._id)
+                          }
+                          dropPosition={
+                            dropTarget?.taskId === task._id &&
+                            dropTarget.destinationId === sprint._id
+                              ? dropTarget.position
+                              : null
+                          }
                         />
                       ))
                     )}
@@ -842,20 +1368,13 @@ export default function SprintsView({
         </div>
       )}
 
-      {/* Backlog */}
-      <section
-        onDragOver={(event) => event.preventDefault()}
-        onDrop={(event) => handleDrop(event, null)}
-        className={`w-full overflow-hidden rounded-xl border bg-white ${
-          draggedTaskId
-            ? "border-blue-300"
-            : "border-gray-200"
-        }`}
-      >
+      {/* ========================================== */}
+      {/* BACKLOG */}
+      {/* ========================================== */}
+
+      <section className="w-full overflow-hidden rounded-xl border border-gray-200 bg-white">
         <header className="border-b border-gray-100 px-5 py-4">
-          <h3 className="font-semibold text-gray-900">
-            Backlog
-          </h3>
+          <h3 className="font-semibold text-gray-900">Backlog</h3>
 
           <p className="mt-1 text-xs text-gray-500">
             Unscheduled project tasks
@@ -865,7 +1384,27 @@ export default function SprintsView({
         <div className="w-full overflow-x-auto">
           <TaskColumnHeader />
 
-          <div className="divide-y divide-gray-100">
+          <div
+            onDragOver={(event) => handleContainerDragOver(event, null)}
+            onDragLeave={(event) => {
+              if (
+                !event.currentTarget.contains(
+                  event.relatedTarget as Node
+                )
+              ) {
+                setDragOverDestinationId(null);
+                setDropTarget(null);
+              }
+            }}
+            onDrop={(event) =>
+              void handleDropOnEmptyArea(event, null)
+            }
+            className={`min-h-16 divide-y divide-gray-100 border-t-2 transition-colors ${
+              dragOverDestinationId === "__backlog__"
+                ? "border-blue-500"
+                : "border-transparent"
+            }`}
+          >
             {backlogTasks.length === 0 ? (
               <p className="m-3 rounded-lg border border-dashed border-gray-200 p-5 text-center text-sm text-gray-500">
                 {draggedTaskId
@@ -879,11 +1418,29 @@ export default function SprintsView({
                 <TaskRow
                   key={task._id}
                   task={task}
+                  members={members}
                   onTaskOpen={onTaskOpen}
+                  onTaskUpdate={handleTaskUpdate}
                   onStatusChange={handleStatusChange}
                   updatingStatus={isUpdatingTask}
                   moving={isMovingTask}
-                  onDragStart={setDraggedTaskId}
+                  onDragStart={(taskId) => {
+                    setDraggedTaskId(taskId);
+                    setDropTarget(null);
+                  }}
+                  onDragEnd={resetDragState}
+                  onTaskDragOver={(event, taskId) =>
+                    handleTaskDragOver(event, taskId, null)
+                  }
+                  onTaskDrop={(event, taskId) =>
+                    void handleTaskDrop(event, taskId, null)
+                  }
+                  dropPosition={
+                    dropTarget?.taskId === task._id &&
+                    dropTarget.destinationId === "__backlog__"
+                      ? dropTarget.position
+                      : null
+                  }
                 />
               ))
             )}
@@ -891,7 +1448,10 @@ export default function SprintsView({
         </div>
       </section>
 
-      {/* Complete / Delete dialogs */}
+      {/* ========================================== */}
+      {/* COMPLETE / DELETE SPRINT MODAL */}
+      {/* ========================================== */}
+
       {(sprintToComplete || sprintToDelete) && (
         <div
           className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 p-4"

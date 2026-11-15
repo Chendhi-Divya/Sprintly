@@ -12,18 +12,13 @@ export type TaskStatus =
   | "In Review"
   | "Done";
 
-export type TaskType =
-  | "Epic"
-  | "Story"
-  | "Task"
-  | "Bug";
+export type TaskType = "Epic" | "Story" | "Task" | "Bug";
 
-export type TaskPriority =
-  | "Low"
-  | "Medium"
-  | "High";
+export type TaskPriority = "Low" | "Medium" | "High";
 
 export type SprintStatus = "Planning" | "Active" | "Completed";
+
+export type TaskDropPosition = "before" | "after";
 
 export interface TaskOrganization {
   _id?: string;
@@ -75,6 +70,9 @@ export interface Task {
   type: TaskType;
   status: TaskStatus;
   priority: TaskPriority;
+
+  // Persisted drag-and-drop order within a sprint or backlog.
+  position?: number;
 
   dueDate?: string;
   createdAt?: string;
@@ -156,6 +154,10 @@ export interface UpdateTaskResponse {
   task: Task;
 }
 
+// ==========================================
+// SPRINT TYPES
+// ==========================================
+
 export interface ProjectSprint {
   _id: string;
   title: string;
@@ -206,10 +208,23 @@ export interface DeleteSprintRequest extends SprintActionRequest {
   moveTasksToSprintId: string | null;
 }
 
+// ==========================================
+// MOVE TASK / REORDER TASK
+// ==========================================
+
 export interface SetTaskSprintRequest {
   projectId: string;
   taskId: string;
+
+  // Destination sprint. Null means backlog.
   sprintId: string | null;
+
+  // Target row where the dragged task should be inserted.
+  // Null means only move to the destination sprint/backlog.
+  targetTaskId?: string | null;
+
+  // Insert before or after the target task.
+  position?: TaskDropPosition;
 }
 
 export interface SprintMutationResponse {
@@ -248,9 +263,7 @@ export interface TaskComment {
   _id: string;
   task: string;
   text: string;
-
   author: TaskUser | string;
-
   createdAt: string;
   updatedAt?: string;
 }
@@ -653,8 +666,13 @@ export const taskApi = createApi({
       ],
     }),
 
+    // ======================================
+    // SPRINT ENDPOINTS
+    // ======================================
+
     getProjectSprints: builder.query<ProjectSprintsResponse, string>({
       query: (projectId) => `/projects/${projectId}/sprints`,
+
       providesTags: (_result, _error, projectId) => [
         { type: "Sprints", id: projectId },
       ],
@@ -669,6 +687,7 @@ export const taskApi = createApi({
         method: "POST",
         body,
       }),
+
       invalidatesTags: (_result, _error, arg) => [
         { type: "Sprints", id: arg.projectId },
       ],
@@ -683,27 +702,36 @@ export const taskApi = createApi({
         method: "PATCH",
         body,
       }),
+
       invalidatesTags: (_result, _error, arg) => [
         { type: "Sprints", id: arg.projectId },
       ],
     }),
 
-    startSprint: builder.mutation<SprintMutationResponse, SprintActionRequest>({
+    startSprint: builder.mutation<
+      SprintMutationResponse,
+      SprintActionRequest
+    >({
       query: ({ projectId, sprintId }) => ({
         url: `/projects/${projectId}/sprints/${sprintId}/start`,
         method: "POST",
       }),
+
       invalidatesTags: (_result, _error, arg) => [
         { type: "Sprints", id: arg.projectId },
       ],
     }),
 
-    completeSprint: builder.mutation<SprintMutationResponse, CompleteSprintRequest>({
+    completeSprint: builder.mutation<
+      SprintMutationResponse,
+      CompleteSprintRequest
+    >({
       query: ({ projectId, sprintId, moveIncompleteToSprintId }) => ({
         url: `/projects/${projectId}/sprints/${sprintId}/complete`,
         method: "POST",
         body: { moveIncompleteToSprintId },
       }),
+
       invalidatesTags: (_result, _error, arg) => [
         { type: "Sprints", id: arg.projectId },
       ],
@@ -718,20 +746,36 @@ export const taskApi = createApi({
         method: "DELETE",
         body: { moveTasksToSprintId },
       }),
+
       invalidatesTags: (_result, _error, arg) => [
         { type: "Sprints", id: arg.projectId },
       ],
     }),
 
+    // ======================================
+    // MOVE TASK / REORDER TASK
+    // ======================================
+
     setTaskSprint: builder.mutation<
       TaskResponse,
       SetTaskSprintRequest
     >({
-      query: ({ projectId, taskId, sprintId }) => ({
+      query: ({
+        projectId,
+        taskId,
+        sprintId,
+        targetTaskId,
+        position,
+      }) => ({
         url: `/projects/${projectId}/tasks/${taskId}/sprint`,
         method: "PATCH",
-        body: { sprintId },
+        body: {
+          sprintId,
+          targetTaskId: targetTaskId ?? null,
+          position: position ?? null,
+        },
       }),
+
       invalidatesTags: (_result, _error, arg) => [
         { type: "Sprints", id: arg.projectId },
         { type: "Tasks", id: arg.taskId },
@@ -794,6 +838,7 @@ export const taskApi = createApi({
 
       invalidatesTags: (_result, _error, arg) => [
         { type: "TaskComments", id: arg.taskId },
+        "Notifications",
       ],
     }),
 
@@ -1204,6 +1249,8 @@ export const {
   useGetTaskByIdQuery,
   useUpdateTaskMutation,
   useCreateTaskMutation,
+
+  // Sprints
   useGetProjectSprintsQuery,
   useCreateSprintMutation,
   useUpdateSprintMutation,
