@@ -1,6 +1,6 @@
+
 import { useEffect, useRef, useState } from "react";
 import {
-  CalendarDays,
   ChevronDown,
   Plus,
   Rocket,
@@ -59,6 +59,13 @@ type EditableTaskFields = {
   priority?: TaskPriority;
   assignee?: string | null;
   dueDate?: string | null;
+};
+
+type SprintEditValues = {
+  title: string;
+  description: string;
+  startDate: string | null;
+  endDate: string | null;
 };
 
 const BACKLOG_ID = "__backlog__";
@@ -121,6 +128,17 @@ function getDateInputValue(value?: string) {
   ].join("-");
 }
 
+// Display dates in DD-MM-YYYY format.
+function formatDateDisplay(value?: string) {
+  const dateValue = getDateInputValue(value);
+
+  if (!dateValue) return "Not set";
+
+  const [year, month, day] = dateValue.split("-");
+
+  return `${day}-${month}-${year}`;
+}
+
 function getAssigneeId(task: Task) {
   return typeof task.assignee === "string"
     ? task.assignee
@@ -173,172 +191,168 @@ function TaskColumnHeader() {
 }
 
 // ==========================================
-// EDITABLE SPRINT DETAILS
+// INLINE SPRINT EDIT FORM
 // ==========================================
 
-function EditableSprintDetails({
+function InlineSprintEditForm({
   sprint,
-  onUpdate,
+  onSave,
+  onCancel,
   disabled,
 }: {
   sprint: ProjectSprint;
-  onUpdate: (updates: {
-    title?: string;
-    description?: string;
-    startDate?: string | null;
-    endDate?: string | null;
-  }) => void;
+  onSave: (updates: SprintEditValues) => void;
+  onCancel: () => void;
   disabled: boolean;
 }) {
-  const [editingTitle, setEditingTitle] = useState(false);
-  const [editingDescription, setEditingDescription] = useState(false);
-
   const [title, setTitle] = useState(sprint.title);
   const [description, setDescription] = useState(
     sprint.description ?? ""
   );
+  const [startDate, setStartDate] = useState(
+    getDateInputValue(sprint.startDate)
+  );
+  const [endDate, setEndDate] = useState(
+    getDateInputValue(sprint.endDate)
+  );
+  const [error, setError] = useState("");
 
-  useEffect(() => {
-    setTitle(sprint.title);
-    setDescription(sprint.description ?? "");
-  }, [sprint.title, sprint.description]);
+  function handleSave() {
+    const trimmedTitle = title.trim();
 
-  function saveTitle() {
-    const updatedTitle = title.trim();
-
-    setEditingTitle(false);
-
-    if (updatedTitle && updatedTitle !== sprint.title) {
-      onUpdate({ title: updatedTitle });
-    } else {
-      setTitle(sprint.title);
+    if (!trimmedTitle) {
+      setError("Sprint title is required.");
+      return;
     }
-  }
 
-  function saveDescription() {
-    setEditingDescription(false);
-
-    if (description !== (sprint.description ?? "")) {
-      onUpdate({ description: description.trim() });
+    if (startDate && endDate && endDate < startDate) {
+      setError("End date must be after or equal to the start date.");
+      return;
     }
+
+    onSave({
+      title: trimmedTitle,
+      description: description.trim(),
+      startDate: startDate || null,
+      endDate: endDate || null,
+    });
   }
 
   return (
-    <div className="min-w-0 space-y-2">
-      <div className="flex min-w-0 items-center gap-2">
-        {editingTitle ? (
+    <div className="w-full space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-base font-semibold text-gray-900">
+          Edit sprint
+        </h3>
+
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={disabled}
+          className="rounded-lg p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
+          aria-label="Cancel editing sprint"
+        >
+          <X size={18} />
+        </button>
+      </div>
+
+      {error && (
+        <p
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+        >
+          {error}
+        </p>
+      )}
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="space-y-1.5 text-sm font-medium text-gray-700">
+          Sprint title
           <input
             autoFocus
             value={title}
-            disabled={disabled}
-            onChange={(event) => setTitle(event.target.value)}
-            onBlur={saveTitle}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") event.currentTarget.blur();
-
-              if (event.key === "Escape") {
-                setTitle(sprint.title);
-                setEditingTitle(false);
-              }
+            onChange={(event) => {
+              setTitle(event.target.value);
+              setError("");
             }}
-            className="min-w-[120px] max-w-[280px] rounded-md border border-blue-300 px-2 py-1 text-sm font-semibold text-gray-900 outline-none focus:ring-2 focus:ring-blue-100"
-          />
-        ) : (
-          <button
-            type="button"
+            maxLength={100}
             disabled={disabled}
-            onClick={() => setEditingTitle(true)}
-            className="group inline-flex min-w-0 items-center gap-2 text-left"
-            title="Edit sprint title"
-          >
-            <span className="truncate font-semibold text-gray-900">
-              {sprint.title}
-            </span>
-            <Pencil
-              size={13}
-              className="shrink-0 text-gray-400 opacity-0 transition group-hover:opacity-100"
-            />
-          </button>
-        )}
+            placeholder="Sprint title"
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:opacity-50"
+          />
+        </label>
 
-        <span
-          className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles[sprint.status]}`}
-        >
-          {sprint.status}
-        </span>
-      </div>
-
-      <div className="flex min-w-0 items-center gap-2">
-        {editingDescription ? (
+        <label className="space-y-1.5 text-sm font-medium text-gray-700">
+          Description
           <textarea
-            autoFocus
-            rows={2}
             value={description}
-            disabled={disabled}
             onChange={(event) => setDescription(event.target.value)}
-            onBlur={saveDescription}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                setDescription(sprint.description ?? "");
-                setEditingDescription(false);
-              }
-            }}
-            placeholder="Add sprint description..."
-            className="w-full max-w-md resize-y rounded-md border border-blue-300 px-2 py-1 text-xs text-gray-600 outline-none focus:ring-2 focus:ring-blue-100"
-          />
-        ) : (
-          <button
-            type="button"
+            maxLength={2000}
+            rows={3}
             disabled={disabled}
-            onClick={() => setEditingDescription(true)}
-            className="group inline-flex min-w-0 items-center gap-2 text-left"
-            title="Edit sprint description"
-          >
-            <span className="truncate text-xs text-gray-500">
-              {sprint.description || "Add description"}
-            </span>
-            <Pencil
-              size={12}
-              className="shrink-0 text-gray-400 opacity-0 transition group-hover:opacity-100"
-            />
-          </button>
-        )}
+            placeholder="Describe the sprint objective"
+            className="w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:opacity-50"
+          />
+        </label>
+
+        <label className="space-y-1.5 text-sm font-medium text-gray-700">
+          Start date
+          <DatePicker
+            value={startDate}
+            onChange={(value) => {
+              setStartDate(value);
+
+              if (endDate && value && endDate < value) {
+                setEndDate("");
+              }
+
+              setError("");
+            }}
+            disabled={disabled}
+            placeholder="Select start date"
+            className="w-full"
+          />
+        </label>
+
+        <label className="space-y-1.5 text-sm font-medium text-gray-700">
+          End date
+          <DatePicker
+            value={endDate}
+            onChange={(value) => {
+              setEndDate(value);
+              setError("");
+            }}
+            min={startDate}
+            disabled={disabled}
+            placeholder="Select end date"
+            className="w-full"
+          />
+        </label>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
-        <div className="inline-flex items-center gap-1.5">
-          <CalendarDays size={13} />
-          <span>From</span>
+      <div className="flex justify-end gap-2 border-t border-gray-100 pt-3">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={disabled}
+          className="rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-600 transition hover:bg-gray-50 disabled:opacity-50"
+        >
+          Cancel
+        </button>
 
-          <DatePicker
-            value={getDateInputValue(sprint.startDate)}
-            onChange={(value) =>
-              onUpdate({ startDate: value || null })
-            }
-            disabled={disabled}
-            placeholder="Start date"
-            className="w-[145px]"
-          />
-        </div>
-
-        <div className="inline-flex items-center gap-1.5">
-          <span>To</span>
-
-          <DatePicker
-            value={getDateInputValue(sprint.endDate)}
-            onChange={(value) =>
-              onUpdate({ endDate: value || null })
-            }
-            min={getDateInputValue(sprint.startDate)}
-            disabled={disabled}
-            placeholder="End date"
-            className="w-[145px]"
-          />
-        </div>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={disabled || !title.trim()}
+          className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {disabled ? "Saving..." : "Save changes"}
+        </button>
       </div>
     </div>
   );
 }
+
 // ==========================================
 // TASK ROW
 // ==========================================
@@ -540,16 +554,16 @@ function TaskRow({
         }`}
       >
         <DatePicker
-  value={getDateInputValue(task.dueDate)}
-  onChange={(value) =>
-    onTaskUpdate(task._id, {
-      dueDate: value || null,
-    })
-  }
-  disabled={moving}
-  placeholder="Select date"
-  className="w-full min-w-0"
-/>
+          value={getDateInputValue(task.dueDate)}
+          onChange={(value) =>
+            onTaskUpdate(task._id, {
+              dueDate: value || null,
+            })
+          }
+          disabled={moving}
+          placeholder="Select date"
+          className="w-full min-w-0"
+        />
       </div>
     </div>
   );
@@ -605,7 +619,8 @@ export default function SprintsView({
     useBulkSetTaskSprintMutation();
 
   const [showForm, setShowForm] = useState(false);
-  const [editingSprintId, setEditingSprintId] = useState<string | null>(null);
+  const [inlineEditingSprintId, setInlineEditingSprintId] =
+    useState<string | null>(null);
 
   const [name, setName] = useState("");
   const [goal, setGoal] = useState("");
@@ -776,18 +791,7 @@ export default function SprintsView({
     setGoal("");
     setStartDate("");
     setEndDate("");
-    setEditingSprintId(null);
     setShowForm(false);
-    setErrorMessage("");
-  }
-
-  function handleEditSprint(sprint: ProjectSprint) {
-    setName(sprint.title);
-    setGoal(sprint.description ?? "");
-    setStartDate(getDateInputValue(sprint.startDate));
-    setEndDate(getDateInputValue(sprint.endDate));
-    setEditingSprintId(sprint._id);
-    setShowForm(true);
     setErrorMessage("");
   }
 
@@ -795,37 +799,11 @@ export default function SprintsView({
   // UPDATE SPRINT DETAILS
   // ==========================================
 
-  async function handleInlineSprintUpdate(
+  async function handleSaveInlineSprint(
     sprint: ProjectSprint,
-    updates: {
-      title?: string;
-      description?: string;
-      startDate?: string | null;
-      endDate?: string | null;
-    }
+    updates: SprintEditValues
   ) {
     setErrorMessage("");
-
-    const updatedStartDate =
-      updates.startDate !== undefined
-        ? updates.startDate
-        : getDateInputValue(sprint.startDate);
-
-    const updatedEndDate =
-      updates.endDate !== undefined
-        ? updates.endDate
-        : getDateInputValue(sprint.endDate);
-
-    if (
-      updatedStartDate &&
-      updatedEndDate &&
-      new Date(updatedEndDate).getTime() <
-        new Date(updatedStartDate).getTime()
-    ) {
-      setErrorMessage("End date must be after or equal to the start date.");
-      await refetchSprints();
-      return;
-    }
 
     try {
       await updateSprint({
@@ -834,10 +812,12 @@ export default function SprintsView({
         ...updates,
       }).unwrap();
 
+      setInlineEditingSprintId(null);
       await refetchSprints();
     } catch (error: unknown) {
-      setErrorMessage(getErrorMessage(error, "Could not update sprint."));
-      await refetchSprints();
+      setErrorMessage(
+        getErrorMessage(error, "Could not update sprint.")
+      );
     }
   }
 
@@ -870,6 +850,11 @@ export default function SprintsView({
     event.preventDefault();
     setErrorMessage("");
 
+    if (!name.trim()) {
+      setErrorMessage("Sprint title is required.");
+      return;
+    }
+
     if (
       startDate &&
       endDate &&
@@ -880,35 +865,19 @@ export default function SprintsView({
     }
 
     try {
-      if (editingSprintId) {
-        await updateSprint({
-          projectId,
-          sprintId: editingSprintId,
-          title: name.trim(),
-          description: goal.trim(),
-          startDate: startDate || null,
-          endDate: endDate || null,
-        }).unwrap();
-      } else {
-        await createSprint({
-          projectId,
-          title: name.trim(),
-          description: goal.trim(),
-          ...(startDate ? { startDate } : {}),
-          ...(endDate ? { endDate } : {}),
-        }).unwrap();
-      }
+      await createSprint({
+        projectId,
+        title: name.trim(),
+        description: goal.trim(),
+        ...(startDate ? { startDate } : {}),
+        ...(endDate ? { endDate } : {}),
+      }).unwrap();
 
       resetForm();
       await refetchSprints();
     } catch (error: unknown) {
       setErrorMessage(
-        getErrorMessage(
-          error,
-          editingSprintId
-            ? "Could not update sprint."
-            : "Could not create sprint."
-        )
+        getErrorMessage(error, "Could not create sprint.")
       );
     }
   }
@@ -1350,36 +1319,36 @@ export default function SprintsView({
             </>
           )}
 
-     {field === "dueDate" && (
-  <div className="space-y-2">
-    <DatePicker
-      value={
-        bulkValues.dueDate === CLEAR_DATE_VALUE
-          ? ""
-          : bulkValues.dueDate
-      }
-      onChange={(value) => updateBulkValue("dueDate", value)}
-      disabled={isBulkUpdating}
-      placeholder="Select due date"
-      className="w-full"
-    />
+        {field === "dueDate" && (
+          <div className="space-y-2">
+            <DatePicker
+              value={
+                bulkValues.dueDate === CLEAR_DATE_VALUE
+                  ? ""
+                  : bulkValues.dueDate
+              }
+              onChange={(value) => updateBulkValue("dueDate", value)}
+              disabled={isBulkUpdating}
+              placeholder="Select due date"
+              className="w-full"
+            />
 
-    <button
-      type="button"
-      onClick={() =>
-        updateBulkValue("dueDate", CLEAR_DATE_VALUE)
-      }
-      disabled={isBulkUpdating}
-      className={`w-full rounded-lg border px-3 py-2 text-xs font-medium transition ${
-        bulkValues.dueDate === CLEAR_DATE_VALUE
-          ? "border-blue-300 bg-blue-50 text-blue-700"
-          : "border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50"
-      }`}
-    >
-      Clear due date
-    </button>
-  </div>
-)}
+            <button
+              type="button"
+              onClick={() =>
+                updateBulkValue("dueDate", CLEAR_DATE_VALUE)
+              }
+              disabled={isBulkUpdating}
+              className={`w-full rounded-lg border px-3 py-2 text-xs font-medium transition ${
+                bulkValues.dueDate === CLEAR_DATE_VALUE
+                  ? "border-blue-300 bg-blue-50 text-blue-700"
+                  : "border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50"
+              }`}
+            >
+              Clear due date
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -1434,7 +1403,6 @@ export default function SprintsView({
               if (showForm) {
                 resetForm();
               } else {
-                setEditingSprintId(null);
                 setName("");
                 setGoal("");
                 setStartDate("");
@@ -1460,7 +1428,7 @@ export default function SprintsView({
         </p>
       )}
 
-      {/* CREATE / EDIT SPRINT FORM */}
+      {/* CREATE SPRINT FORM */}
 
       {showForm && (
         <form
@@ -1469,7 +1437,7 @@ export default function SprintsView({
         >
           <div className="flex items-center justify-between sm:col-span-2">
             <h3 className="font-semibold text-gray-900">
-              {editingSprintId ? "Edit sprint" : "Create sprint"}
+              Create sprint
             </h3>
 
             <button
@@ -1507,39 +1475,37 @@ export default function SprintsView({
           </label>
 
           <label className="space-y-1 text-sm font-medium text-gray-700">
-  From
+            From
+            <DatePicker
+              value={startDate}
+              onChange={(value) => {
+                setStartDate(value);
 
-  <DatePicker
-    value={startDate}
-    onChange={(value) => {
-      setStartDate(value);
+                if (endDate && value && endDate < value) {
+                  setEndDate("");
+                }
+              }}
+              placeholder="Select start date"
+              className="w-full"
+            />
+          </label>
 
-      if (endDate && value && endDate < value) {
-        setEndDate("");
-      }
-    }}
-    placeholder="Select start date"
-    className="w-full"
-  />
-</label>
-
-<label className="space-y-1 text-sm font-medium text-gray-700">
-  To
-
-  <DatePicker
-    value={endDate}
-    onChange={setEndDate}
-    min={startDate}
-    placeholder="Select end date"
-    className="w-full"
-  />
-</label>
+          <label className="space-y-1 text-sm font-medium text-gray-700">
+            To
+            <DatePicker
+              value={endDate}
+              onChange={setEndDate}
+              min={startDate}
+              placeholder="Select end date"
+              className="w-full"
+            />
+          </label>
 
           <div className="flex justify-end gap-2 sm:col-span-2">
             <button
               type="button"
               onClick={resetForm}
-              disabled={isCreating || isUpdating}
+              disabled={isCreating}
               className="rounded-lg border px-4 py-2 text-sm text-gray-600 hover:bg-gray-50"
             >
               Cancel
@@ -1547,14 +1513,10 @@ export default function SprintsView({
 
             <button
               type="submit"
-              disabled={isCreating || isUpdating || !name.trim()}
+              disabled={isCreating || !name.trim()}
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
             >
-              {isCreating || isUpdating
-                ? "Saving…"
-                : editingSprintId
-                  ? "Save changes"
-                  : "Create sprint"}
+              {isCreating ? "Creating…" : "Create sprint"}
             </button>
           </div>
         </form>
@@ -1571,48 +1533,81 @@ export default function SprintsView({
           {orderedSprints.map((sprint) => {
             const visibleTasks = filterTasks(sprint.tasks);
             const isBusy = isStarting || isCompleting || isDeleting;
+            const isEditingThisSprint =
+              inlineEditingSprintId === sprint._id;
 
             return (
               <section
                 key={sprint._id}
                 className="w-full overflow-hidden rounded-xl border border-gray-200 bg-white"
               >
-                <header className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4">
-                  <div className="min-w-0 flex-1">
-                    <EditableSprintDetails
+                {/* SPRINT HEADER / INLINE EDIT FORM */}
+
+                {isEditingThisSprint ? (
+                  <div className="border-b border-gray-100 bg-blue-50/20 p-5">
+                    <InlineSprintEditForm
                       sprint={sprint}
-                      onUpdate={(updates) =>
-                        void handleInlineSprintUpdate(sprint, updates)
+                      onSave={(updates) =>
+                        void handleSaveInlineSprint(sprint, updates)
                       }
-                      disabled={isBusy || isUpdating}
+                      onCancel={() => setInlineEditingSprintId(null)}
+                      disabled={isUpdating}
                     />
                   </div>
+                ) : (
+                  <header className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4">
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <h3 className="truncate font-semibold text-gray-900">
+                          {sprint.title}
+                        </h3>
 
-                  <div className="flex shrink-0 items-center gap-2">
-                    {sprint.status === "Planning" && (
-                      <button
-                        type="button"
-                        onClick={() => void handleStart(sprint)}
-                        disabled={
-                          isBusy ||
-                          Boolean(activeSprint) ||
-                          !sprint.startDate ||
-                          !sprint.endDate
-                        }
-                        title={
-                          activeSprint
-                            ? "Complete the active sprint first"
-                            : "Start sprint"
-                        }
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Rocket size={14} />
-                        Start
-                      </button>
-                    )}
+                        <span
+                          className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles[sprint.status]}`}
+                        >
+                          {sprint.status}
+                        </span>
+                      </div>
 
-                    {sprint.status === "Active" && (
-                      <>
+                      <p className="text-xs text-gray-500">
+                        {sprint.description || "No description"}
+                      </p>
+
+                      <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
+                        <span>
+                          From: {formatDateDisplay(sprint.startDate)}
+                        </span>
+
+                        <span>
+                          To: {formatDateDisplay(sprint.endDate)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-2">
+                      {sprint.status === "Planning" && (
+                        <button
+                          type="button"
+                          onClick={() => void handleStart(sprint)}
+                          disabled={
+                            isBusy ||
+                            Boolean(activeSprint) ||
+                            !sprint.startDate ||
+                            !sprint.endDate
+                          }
+                          title={
+                            activeSprint
+                              ? "Complete the active sprint first"
+                              : "Start sprint"
+                          }
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Rocket size={14} />
+                          Start
+                        </button>
+                      )}
+
+                      {sprint.status === "Active" && (
                         <button
                           type="button"
                           onClick={() => {
@@ -1624,50 +1619,45 @@ export default function SprintsView({
                         >
                           Complete sprint
                         </button>
+                      )}
 
+                      {(sprint.status === "Active" ||
+                        sprint.status === "Planning") && (
                         <button
                           type="button"
-                          onClick={() => handleEditSprint(sprint)}
-                          disabled={isBusy || isCreating || isUpdating}
+                          onClick={() => {
+                            setErrorMessage("");
+                            setInlineEditingSprintId(sprint._id);
+                          }}
+                          disabled={isBusy || isUpdating}
                           title="Edit sprint"
                           aria-label={`Edit ${sprint.title}`}
-                          className="rounded-lg border border-gray-200 bg-white p-2 text-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          <Pencil size={15} />
+                          <Pencil size={14} />
                         </button>
-                      </>
-                    )}
+                      )}
 
-                    {sprint.status === "Planning" && (
-                      <button
-                        type="button"
-                        onClick={() => handleEditSprint(sprint)}
-                        disabled={isBusy || isCreating || isUpdating}
-                        title="Edit sprint"
-                        aria-label={`Edit ${sprint.title}`}
-                        className="rounded-lg border border-gray-200 bg-white p-2 text-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Pencil size={15} />
-                      </button>
-                    )}
+                      {sprint.status !== "Active" && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMoveDestinationId("");
+                            setSprintToDelete(sprint);
+                          }}
+                          disabled={isBusy}
+                          title="Delete sprint"
+                          className="rounded-lg border border-gray-200 bg-white p-2 text-gray-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                          aria-label={`Delete ${sprint.title}`}
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      )}
+                    </div>
+                  </header>
+                )}
 
-                    {sprint.status !== "Active" && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setMoveDestinationId("");
-                          setSprintToDelete(sprint);
-                        }}
-                        disabled={isBusy}
-                        title="Delete sprint"
-                        className="rounded-lg border border-gray-200 bg-white p-2 text-gray-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
-                        aria-label={`Delete ${sprint.title}`}
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    )}
-                  </div>
-                </header>
+                {/* TASK LIST */}
 
                 <div className="w-full overflow-x-auto">
                   <TaskColumnHeader />
@@ -1836,8 +1826,6 @@ export default function SprintsView({
           />
 
           <aside className="absolute right-0 top-0 flex h-full w-full max-w-md flex-col border-l border-gray-200 bg-white shadow-2xl">
-            {/* PANEL HEADER */}
-
             <header className="flex items-center justify-between border-b border-gray-100 px-6 py-5">
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
@@ -1865,10 +1853,7 @@ export default function SprintsView({
               </button>
             </header>
 
-            {/* PANEL CONTENT */}
-
             <div className="flex-1 space-y-5 overflow-y-auto p-6">
-              
               {bulkError && (
                 <p
                   role="alert"
@@ -1886,8 +1871,6 @@ export default function SprintsView({
                 {renderBulkField("dueDate")}
               </div>
             </div>
-
-            {/* PANEL FOOTER */}
 
             <footer className="space-y-3 border-t border-gray-100 bg-white px-6 py-5">
               <button

@@ -99,7 +99,6 @@ export default function OrganizationSettings() {
   );
 
   const [orgName, setOrgName] = useState("");
-  const [isEditingOrgName, setIsEditingOrgName] = useState(false);
   const [email, setEmail] = useState("");
   const [inviteProjectId, setInviteProjectId] = useState("");
   const [inviteRole, setInviteRole] =
@@ -135,6 +134,12 @@ export default function OrganizationSettings() {
   });
 
   const organization = data?.organization;
+
+  // Show Save only when the organization name has changed.
+  const hasOrganizationNameChanges = Boolean(
+    organization &&
+      orgName.trim() !== (organization.org_name ?? "")
+  );
 
   const {
     data: projectsData,
@@ -313,6 +318,8 @@ export default function OrganizationSettings() {
       return;
     }
 
+    if (!hasOrganizationNameChanges || isSaving) return;
+
     setErrorMessage("");
     setNotice("");
 
@@ -331,7 +338,7 @@ export default function OrganizationSettings() {
         })
       );
 
-      setIsEditingOrgName(false);
+      setOrgName(response.organization.org_name);
       setNotice("Organization name updated.");
     } catch (error: unknown) {
       setErrorMessage(
@@ -750,6 +757,7 @@ export default function OrganizationSettings() {
             <section className="space-y-5">
               {tab === "General" && (
                 <>
+                  {/* Organization name */}
                   <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
                     <div className="flex flex-wrap items-center justify-between gap-4">
                       <div>
@@ -763,37 +771,19 @@ export default function OrganizationSettings() {
                       </div>
 
                       {canManage && (
-                        <div className="flex flex-wrap items-center gap-2">
-                          {!isEditingOrgName && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setOrgName(organization?.org_name ?? "");
-                                setIsEditingOrgName(true);
-                              }}
-                              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                            >
-                              Edit organization name
-                            </button>
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={() => navigate("/projects/create")}
-                            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
-                          >
-                            <Plus size={17} />
-                            Create New Project
-                          </button>
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => navigate("/projects/create")}
+                          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
+                        >
+                          <Plus size={17} />
+                          Create New Project
+                        </button>
                       )}
                     </div>
 
-                    {isEditingOrgName ? (
-                      <form
-                        onSubmit={handleSave}
-                        className="mt-5 space-y-4"
-                      >
+                    {canManage ? (
+                      <form onSubmit={handleSave} className="mt-5 space-y-4">
                         <label className="block space-y-1.5 text-sm font-medium text-slate-700">
                           Organization name
 
@@ -805,44 +795,34 @@ export default function OrganizationSettings() {
                             maxLength={100}
                             required
                             disabled={isSaving}
-                            autoFocus
-                            className="w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50"
+                            className="w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50"
                             placeholder="Acme Technologies"
                           />
                         </label>
 
-                        <div className="flex justify-end gap-2">
-                          <button
-                            type="button"
-                            disabled={isSaving}
-                            onClick={() => {
-                              setOrgName(organization?.org_name ?? "");
-                              setIsEditingOrgName(false);
-                            }}
-                            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                          >
-                            Cancel
-                          </button>
-
-                          <button
-                            type="submit"
-                            disabled={isSaving}
-                            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
-                          >
-                            {isSaving ? "Saving…" : "Save"}
-                          </button>
-                        </div>
+                        {hasOrganizationNameChanges && (
+                          <div className="flex justify-end">
+                            <button
+                              type="submit"
+                              disabled={isSaving || !orgName.trim()}
+                              className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {isSaving ? "Saving…" : "Save"}
+                            </button>
+                          </div>
+                        )}
                       </form>
                     ) : (
-                      <p className="mt-5 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-base font-medium text-slate-900">
-                        {organization?.org_name ?? selectedOrganization.org_name}
-                      </p>
-                    )}
+                      <>
+                        <p className="mt-5 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-base font-medium text-slate-900">
+                          {organization?.org_name ??
+                            selectedOrganization.org_name}
+                        </p>
 
-                    {!canManage && (
-                      <p className="mt-3 text-sm text-slate-500">
-                        Only organization Owners and Admins can edit this name.
-                      </p>
+                        <p className="mt-3 text-sm text-slate-500">
+                          Only organization Owners and Admins can edit this name.
+                        </p>
+                      </>
                     )}
                   </div>
 

@@ -31,15 +31,33 @@ function parseDate(value: string): Date | null {
 
   const date = new Date(year, month - 1, day);
 
-  return Number.isNaN(date.getTime()) ? null : date;
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return date;
 }
 
+// Keep the backend value in YYYY-MM-DD format.
 function formatDate(date: Date): string {
   return [
     date.getFullYear(),
     String(date.getMonth() + 1).padStart(2, "0"),
     String(date.getDate()).padStart(2, "0"),
   ].join("-");
+}
+
+// Display the selected date as DD-MM-YYYY.
+function formatDisplayDate(date: Date): string {
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
+
+  return `${day}-${month}-${year}`;
 }
 
 function isSameDate(first: Date, second: Date) {
@@ -59,6 +77,7 @@ export default function DatePicker({
   className = "",
 }: DatePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
+
   const [calendarPosition, setCalendarPosition] =
     useState<CalendarPosition | null>(null);
 
@@ -223,12 +242,9 @@ export default function DatePicker({
     setIsOpen(false);
   }
 
+  // Selected date appears as DD-MM-YYYY.
   const displayValue = selectedDate
-    ? selectedDate.toLocaleDateString("en-IN", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      })
+    ? formatDisplayDate(selectedDate)
     : "";
 
   return (

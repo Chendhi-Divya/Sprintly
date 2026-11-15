@@ -145,6 +145,8 @@ export default function Navbar({
 
   const user = useSelector((state: RootState) => state.auth.user);
 
+  const hasProfileNameChanges =
+  profileName.trim() !== (user?.name ?? "");
   const selectedOrganization = useSelector(
     (state: RootState) => state.auth.selectedOrganization
   );
@@ -440,10 +442,9 @@ export default function Navbar({
       return;
     }
 
-    if (trimmedName === user?.name) {
-      setProfileError("No changes were made.");
-      return;
-    }
+    if (trimmedName === (user?.name ?? "")) {
+  return;
+}
 
     try {
       const response = await updateProfile({
@@ -1337,17 +1338,21 @@ export default function Navbar({
                     </div>
                   )}
 
-                  <div className="flex justify-end">
-                    <button
-                      type="submit"
-                      disabled={
-                        isUpdatingProfile || !profileName.trim()
-                      }
-                      className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {isUpdatingProfile ? "Saving..." : "Save changes"}
-                    </button>
-                  </div>
+                 {hasProfileNameChanges && (
+  <div className="flex justify-end">
+    <button
+      type="submit"
+      disabled={
+        isUpdatingProfile ||
+        !profileName.trim() ||
+        profileName.trim().length < 2
+      }
+      className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {isUpdatingProfile ? "Saving..." : "Save"}
+    </button>
+  </div>
+)}
                 </form>
               </section>
 
