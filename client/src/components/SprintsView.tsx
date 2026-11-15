@@ -93,7 +93,6 @@ function getErrorMessage(error: unknown, fallback: string): string {
 
   return fallback;
 }
-
 function formatDate(value?: string) {
   if (!value) return "Date not set";
 
