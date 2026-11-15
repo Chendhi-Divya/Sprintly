@@ -15,7 +15,7 @@ import CreateProject from "./pages/CreateProject";
 
 import ProtectedRoute from "./routes/ProtectedRoute";
 import Tasks from "./pages/Tasks";
-import Navbar from "./components/Navbar";
+
 import WorkspaceLayout from "./pages/WorkspaceLayout";
 import OrganizationSettings from "./pages/OrganizationSettings";
 import ProjectSettings from "./pages/ProjectSettings.tsx";
