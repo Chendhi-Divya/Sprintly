@@ -129,7 +129,7 @@ export default function Navbar({
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [passwordOTP, setPasswordOTP] = useState("");
-  const [isPasswordOTPSent, setIsPasswordOTPSent] = useState(false);
+  const [, setIsPasswordOTPSent] = useState(false);
   const [passwordError, setPasswordError] = useState("");
   const [passwordSuccess, setPasswordSuccess] = useState("");
 
