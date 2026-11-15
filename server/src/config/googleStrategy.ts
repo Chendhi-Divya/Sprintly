@@ -22,6 +22,7 @@ passport.use(
       callbackURL:
         process.env.GOOGLE_CALLBACK_URL ||
         "http://localhost:5000/api/auth/google/callback",
+      passReqToCallback: false,
     },
     async (_accessToken, _refreshToken, profile, done) => {
       try {
@@ -31,8 +32,10 @@ passport.use(
 
         const googleData = profile._json as {
           email_verified?: boolean;
+          given_name?: string;
         };
 
+        // Make sure Google has provided a verified email
         if (!email || googleData.email_verified !== true) {
           return done(
             new Error("Google account email is not verified."),
@@ -40,13 +43,15 @@ passport.use(
           );
         }
 
-        // Prepare a guaranteed string for the user's name
-        const name =
-          profile.displayName?.trim() ||
+        // Get only the first name from Google's profile
+        const firstName =
+          googleData.given_name?.trim() ||
+          profile.name?.givenName?.trim() ||
+          profile.displayName?.trim().split(/\s+/)[0] ||
           email.split("@")[0] ||
           "Sprintly User";
 
-        // Check whether this Google account is already registered
+        // Check whether this Google account already exists
         let user = await User.findOne({
           googleId: profile.id,
         });
@@ -68,7 +73,7 @@ passport.use(
             );
           }
 
-          // Link the Google account to the existing user
+          // Link Google to the existing account
           user.googleId = profile.id;
           user.isVerified = true;
 
@@ -77,9 +82,9 @@ passport.use(
           return done(null, user);
         }
 
-        // Create a new Google user
+        // Create a new Google user in MongoDB
         const newUser = await User.create({
-          name,
+          name: firstName,
           email,
           googleId: profile.id,
           isVerified: true,
