@@ -1663,9 +1663,7 @@ export default function Navbar({
             </div>
 
             <div className="border-t border-gray-200 bg-white px-6 py-4">
-              <p className="text-xs text-gray-500">
-                Your account information is protected and kept up to date.
-              </p>
+              
             </div>
           </div>
         </div>

@@ -67,15 +67,7 @@ function App() {
 
         <Route path="/dashboard" element={<WorkspaceLayout />} />
 
-        <Route
-          path="/tasks"
-          element={
-            <>
-              <Navbar selectedProjectId="" />
-              <Tasks />
-            </>
-          }
-        />
+        <Route path="/tasks" element={<Tasks />} />
       </Route>
     </Routes>
   );

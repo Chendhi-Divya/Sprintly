@@ -859,6 +859,329 @@ export const updateTask = async (req: Request, res: Response) => {
   }
 };
 
+
+// BULK UPDATE SELECTED TASKS
+
+// BULK UPDATE SELECTED TASKS
+export const bulkUpdateTasks = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).userId;
+    const { taskIds, field, value } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({
+        message: "User is not authenticated",
+      });
+    }
+
+    // Validate selected task IDs.
+    if (
+      !Array.isArray(taskIds) ||
+      taskIds.length === 0 ||
+      taskIds.length > 100
+    ) {
+      return res.status(400).json({
+        message: "Select between 1 and 100 tasks",
+      });
+    }
+
+    if (
+      !taskIds.every(
+        (id: unknown) =>
+          typeof id === "string" && mongoose.isValidObjectId(id)
+      )
+    ) {
+      return res.status(400).json({
+        message: "One or more task IDs are invalid",
+      });
+    }
+
+    // Reject duplicate IDs.
+    const uniqueTaskIds = [...new Set(taskIds as string[])];
+
+    if (uniqueTaskIds.length !== taskIds.length) {
+      return res.status(400).json({
+        message: "Duplicate task IDs are not allowed",
+      });
+    }
+
+    const allowedFields = [
+      "status",
+      "priority",
+      "type",
+      "assignee",
+      "dueDate",
+    ];
+
+    if (!allowedFields.includes(field)) {
+      return res.status(400).json({
+        message: "Invalid field selected for bulk update",
+        allowedFields,
+      });
+    }
+
+    const allowedStatuses = [
+      "To Do",
+      "In Progress",
+      "In Review",
+      "Done",
+    ];
+
+    const allowedPriorities = [
+      "Low",
+      "Medium",
+      "High",
+    ];
+
+    const allowedTypes = [
+      "Epic",
+      "Story",
+      "Task",
+      "Bug",
+      "Sub-task",
+    ];
+
+    // Validate status.
+    if (
+      field === "status" &&
+      !allowedStatuses.includes(value)
+    ) {
+      return res.status(400).json({
+        message: "Invalid task status",
+        allowedStatuses,
+      });
+    }
+
+    // Validate priority.
+    if (
+      field === "priority" &&
+      !allowedPriorities.includes(value)
+    ) {
+      return res.status(400).json({
+        message: "Invalid task priority",
+        allowedPriorities,
+      });
+    }
+
+    // Validate task type.
+    if (
+      field === "type" &&
+      !allowedTypes.includes(value)
+    ) {
+      return res.status(400).json({
+        message: "Invalid task type",
+        allowedTypes,
+      });
+    }
+
+    // Fetch all selected tasks.
+    const tasks = await Task.find({
+      _id: { $in: uniqueTaskIds },
+    });
+
+    if (tasks.length !== uniqueTaskIds.length) {
+      return res.status(404).json({
+        message: "One or more selected tasks were not found",
+      });
+    }
+
+    // Ensure all selected tasks belong to the same project.
+    const firstTask = tasks[0];
+
+    if (!firstTask) {
+      return res.status(404).json({
+        message: "No selected tasks were found",
+      });
+    }
+
+    const projectId = firstTask.project.toString();
+
+    const belongsToSameProject = tasks.every(
+      (task) => task.project.toString() === projectId
+    );
+
+    if (!belongsToSameProject) {
+      return res.status(400).json({
+        message: "All selected tasks must belong to the same project",
+      });
+    }
+
+    const project = await Project.findById(projectId);
+
+    if (!project) {
+      return res.status(404).json({
+        message: "Project not found",
+      });
+    }
+
+    // Check whether the current user belongs to the project.
+    const isMember = project.members.some(
+      (memberId) => memberId.toString() === userId.toString()
+    );
+
+    if (!isMember) {
+      return res.status(403).json({
+        message: "You are not a member of this project",
+      });
+    }
+
+    // Validate assignee.
+    if (field === "assignee" && value !== null && value !== "") {
+      if (
+        typeof value !== "string" ||
+        !mongoose.isValidObjectId(value)
+      ) {
+        return res.status(400).json({
+          message: "Invalid assignee ID",
+        });
+      }
+
+      const isAssigneeMember = project.members.some(
+        (memberId) => memberId.toString() === value
+      );
+
+      if (!isAssigneeMember) {
+        return res.status(403).json({
+          message: "Assignee must be a member of the project",
+        });
+      }
+
+      const belongsToOrganization =
+        await assigneeBelongsToProjectOrganization(
+          project.organization,
+          value
+        );
+
+      if (!belongsToOrganization) {
+        return res.status(403).json({
+          message: "Assignee must belong to the project's organization",
+        });
+      }
+    }
+
+    // Validate due date.
+    let parsedDueDate: Date | null = null;
+
+    if (field === "dueDate" && value !== null && value !== "") {
+      if (typeof value !== "string") {
+        return res.status(400).json({
+          message: "Invalid due date",
+        });
+      }
+
+      parsedDueDate = new Date(value);
+
+      if (Number.isNaN(parsedDueDate.getTime())) {
+        return res.status(400).json({
+          message: "Invalid due date",
+        });
+      }
+    }
+
+    // Update every selected task.
+    for (const task of tasks) {
+      const previousAssigneeId = task.assignee?.toString();
+
+      switch (field) {
+        case "status":
+          task.status = value;
+          break;
+
+        case "priority":
+          task.priority = value;
+          break;
+
+        case "type":
+          task.type = value;
+          break;
+
+        case "assignee":
+          if (value === null || value === "") {
+            task.set("assignee", null);
+          } else {
+            task.assignee = value;
+          }
+          break;
+
+        case "dueDate":
+          if (value === null || value === "") {
+            task.set("dueDate", null);
+          } else if (parsedDueDate) {
+            task.dueDate = parsedDueDate;
+          }
+          break;
+      }
+
+      await task.save();
+
+      // Notify the newly assigned user.
+      const newAssigneeId = task.assignee?.toString();
+
+      if (
+        field === "assignee" &&
+        newAssigneeId &&
+        newAssigneeId !== previousAssigneeId &&
+        newAssigneeId !== userId.toString()
+      ) {
+        try {
+          await Notification.create({
+            recipient: newAssigneeId,
+            type: "task_assigned",
+            message: `You have been assigned to task "${task.title}" (${task.taskKey}).`,
+            task: task._id,
+          });
+        } catch (notificationError) {
+          console.error(
+            "BULK UPDATE NOTIFICATION ERROR:",
+            notificationError
+          );
+        }
+      }
+    }
+
+    // Fetch updated tasks with populated fields.
+    const updatedTasks = await Task.find({
+      _id: { $in: uniqueTaskIds },
+    })
+      .populate("project", "name key")
+      .populate("assignee", "name email")
+      .populate("reporter", "name email")
+      .populate("parentTask", "title taskKey type")
+      .populate("sprint", "title status startDate endDate");
+
+    // Preserve the order supplied by the frontend.
+    const updatedTaskMap = new Map(
+      updatedTasks.map((task) => [
+        task._id.toString(),
+        task,
+      ])
+    );
+
+    return res.status(200).json({
+      message: `${updatedTasks.length} tasks updated successfully`,
+      tasks: uniqueTaskIds.map((id) => updatedTaskMap.get(id)),
+    });
+  } catch (error) {
+    console.error("BULK UPDATE TASKS ERROR:", error);
+
+    if (
+      error instanceof Error &&
+      error.name === "ValidationError"
+    ) {
+      return res.status(400).json({
+        message: "Task validation failed",
+        error: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      message: "Failed to bulk update tasks",
+      error: error instanceof Error ? error.message : error,
+    });
+  }
+};
+
+
 // DELETE TASK
 export const deleteTask = async (req: Request, res: Response) => {
   try {

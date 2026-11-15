@@ -71,7 +71,6 @@ export interface Task {
   status: TaskStatus;
   priority: TaskPriority;
 
-  // Persisted drag-and-drop order within a sprint or backlog.
   position?: number;
 
   dueDate?: string;
@@ -155,6 +154,40 @@ export interface UpdateTaskResponse {
 }
 
 // ==========================================
+// BULK UPDATE TASKS
+// ==========================================
+
+export type BulkTaskField =
+  | "status"
+  | "priority"
+  | "type"
+  | "assignee"
+  | "dueDate";
+
+export interface BulkUpdateTasksRequest {
+  taskIds: string[];
+  field: BulkTaskField;
+  value: string | null;
+}
+
+export interface BulkUpdateTasksResponse {
+  message: string;
+  tasks: Task[];
+}
+
+// ==========================================
+// BULK MOVE TASKS
+// ==========================================
+
+export interface BulkSetTaskSprintRequest {
+  projectId: string;
+  taskIds: string[];
+  sprintId: string | null;
+  targetTaskId?: string | null;
+  position?: TaskDropPosition;
+}
+
+// ==========================================
 // SPRINT TYPES
 // ==========================================
 
@@ -215,15 +248,8 @@ export interface DeleteSprintRequest extends SprintActionRequest {
 export interface SetTaskSprintRequest {
   projectId: string;
   taskId: string;
-
-  // Destination sprint. Null means backlog.
   sprintId: string | null;
-
-  // Target row where the dragged task should be inserted.
-  // Null means only move to the destination sprint/backlog.
   targetTaskId?: string | null;
-
-  // Insert before or after the target task.
   position?: TaskDropPosition;
 }
 
@@ -667,6 +693,27 @@ export const taskApi = createApi({
     }),
 
     // ======================================
+    // BULK UPDATE TASKS
+    // ======================================
+
+    bulkUpdateTasks: builder.mutation<
+      BulkUpdateTasksResponse,
+      BulkUpdateTasksRequest
+    >({
+      query: (body) => ({
+        url: "/tasks/bulk-update",
+        method: "PATCH",
+        body,
+      }),
+
+      invalidatesTags: [
+        { type: "Tasks", id: "LIST" },
+        "Notifications",
+        "Sprints",
+      ],
+    }),
+
+    // ======================================
     // SPRINT ENDPOINTS
     // ======================================
 
@@ -780,6 +827,41 @@ export const taskApi = createApi({
         { type: "Sprints", id: arg.projectId },
         { type: "Tasks", id: arg.taskId },
         { type: "Tasks", id: "LIST" },
+      ],
+    }),
+
+    // ======================================
+    // BULK MOVE TASKS
+    // ======================================
+
+    bulkSetTaskSprint: builder.mutation<
+      SprintMutationResponse,
+      BulkSetTaskSprintRequest
+    >({
+      query: ({
+        projectId,
+        taskIds,
+        sprintId,
+        targetTaskId,
+        position,
+      }) => ({
+        url: `/projects/${projectId}/tasks/bulk-sprint`,
+        method: "PATCH",
+        body: {
+          taskIds,
+          sprintId,
+          targetTaskId: targetTaskId ?? null,
+          position: position ?? null,
+        },
+      }),
+
+      invalidatesTags: (_result, _error, arg) => [
+        { type: "Sprints", id: arg.projectId },
+        { type: "Tasks", id: "LIST" },
+        ...arg.taskIds.map((id) => ({
+          type: "Tasks" as const,
+          id,
+        })),
       ],
     }),
 
@@ -1249,6 +1331,7 @@ export const {
   useGetTaskByIdQuery,
   useUpdateTaskMutation,
   useCreateTaskMutation,
+  useBulkUpdateTasksMutation,
 
   // Sprints
   useGetProjectSprintsQuery,
@@ -1258,6 +1341,7 @@ export const {
   useCompleteSprintMutation,
   useDeleteSprintMutation,
   useSetTaskSprintMutation,
+  useBulkSetTaskSprintMutation,
 
   // Subtasks
   useGetSubtasksQuery,

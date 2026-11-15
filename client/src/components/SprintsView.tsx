@@ -1,5 +1,4 @@
-
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CalendarDays,
   ChevronDown,
@@ -9,7 +8,7 @@ import {
   Pencil,
   UserRound,
   X,
-
+  ListChecks,
 } from "lucide-react";
 
 import {
@@ -18,15 +17,18 @@ import {
   useDeleteSprintMutation,
   useGetProjectSprintsQuery,
   useGetProjectMembersQuery,
-  useSetTaskSprintMutation,
   useStartSprintMutation,
   useUpdateSprintMutation,
   useUpdateTaskMutation,
+  useBulkUpdateTasksMutation,
+  useBulkSetTaskSprintMutation,
   type ProjectSprint,
   type SprintStatus,
   type Task,
   type TaskPriority,
   type TaskStatus,
+  type TaskType,
+  type BulkTaskField,
 } from "../services/taskApi";
 
 type SprintsViewProps = {
@@ -58,6 +60,10 @@ type EditableTaskFields = {
   dueDate?: string | null;
 };
 
+const BACKLOG_ID = "__backlog__";
+const UNASSIGNED_VALUE = "__unassigned__";
+const CLEAR_DATE_VALUE = "__clear_date__";
+
 const statusStyles: Record<SprintStatus, string> = {
   Planning: "bg-amber-50 text-amber-700",
   Active: "bg-blue-50 text-blue-700",
@@ -71,11 +77,17 @@ const taskStatuses: TaskStatus[] = [
   "Done",
 ];
 
-const taskPriorities: TaskPriority[] = [
-  "Low",
-  "Medium",
-  "High",
-];
+const taskPriorities: TaskPriority[] = ["Low", "Medium", "High"];
+
+const taskTypes: TaskType[] = ["Epic", "Story", "Task", "Bug"];
+
+const emptyBulkValues: Record<BulkTaskField, string> = {
+  status: "",
+  priority: "",
+  type: "",
+  assignee: "",
+  dueDate: "",
+};
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (typeof error === "object" && error !== null && "data" in error) {
@@ -93,7 +105,6 @@ function getErrorMessage(error: unknown, fallback: string): string {
 
   return fallback;
 }
-
 
 function getDateInputValue(value?: string) {
   if (!value) return "";
@@ -150,7 +161,7 @@ function isTaskOverdue(task: Task) {
 
 function TaskColumnHeader() {
   return (
-    <div className="grid min-w-[950px] grid-cols-[minmax(240px,1fr)_145px_110px_165px_145px] items-center gap-4 border-b border-gray-100 bg-gray-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+    <div className="grid min-w-[1000px] grid-cols-[minmax(270px,1fr)_145px_110px_165px_145px] items-center gap-4 border-b border-gray-100 bg-gray-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
       <span>Task</span>
       <span>Status</span>
       <span>Priority</span>
@@ -170,14 +181,12 @@ function EditableSprintDetails({
   disabled,
 }: {
   sprint: ProjectSprint;
-  onUpdate: (
-    updates: {
-      title?: string;
-      description?: string;
-      startDate?: string | null;
-      endDate?: string | null;
-    }
-  ) => void;
+  onUpdate: (updates: {
+    title?: string;
+    description?: string;
+    startDate?: string | null;
+    endDate?: string | null;
+  }) => void;
   disabled: boolean;
 }) {
   const [editingTitle, setEditingTitle] = useState(false);
@@ -224,9 +233,7 @@ function EditableSprintDetails({
             onChange={(event) => setTitle(event.target.value)}
             onBlur={saveTitle}
             onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.currentTarget.blur();
-              }
+              if (event.key === "Enter") event.currentTarget.blur();
 
               if (event.key === "Escape") {
                 setTitle(sprint.title);
@@ -306,9 +313,7 @@ function EditableSprintDetails({
             value={getDateInputValue(sprint.startDate)}
             disabled={disabled}
             onChange={(event) =>
-              onUpdate({
-                startDate: event.target.value || null,
-              })
+              onUpdate({ startDate: event.target.value || null })
             }
             className="max-w-[135px] rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 outline-none focus:border-blue-500 disabled:opacity-50"
           />
@@ -322,9 +327,7 @@ function EditableSprintDetails({
             min={getDateInputValue(sprint.startDate) || undefined}
             disabled={disabled}
             onChange={(event) =>
-              onUpdate({
-                endDate: event.target.value || null,
-              })
+              onUpdate({ endDate: event.target.value || null })
             }
             className="max-w-[135px] rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 outline-none focus:border-blue-500 disabled:opacity-50"
           />
@@ -346,6 +349,8 @@ function TaskRow({
   onStatusChange,
   updatingStatus,
   moving,
+  selected,
+  onSelect,
   onDragStart,
   onDragEnd,
   onTaskDragOver,
@@ -362,6 +367,8 @@ function TaskRow({
   onStatusChange: (taskId: string, status: TaskStatus) => void;
   updatingStatus: boolean;
   moving: boolean;
+  selected: boolean;
+  onSelect: (taskId: string, checked: boolean) => void;
   onDragStart: (taskId: string) => void;
   onDragEnd: () => void;
   onTaskDragOver: (
@@ -378,7 +385,7 @@ function TaskRow({
   const overdue = isTaskOverdue(task);
 
   const selectClass =
-    "w-full min-w-0 cursor-pointer appearance-none rounded-md border border-gray-200 bg-white py-2 pl-3 pr-9 text-xs font-medium text-gray-700 outline-none transition hover:border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50";
+    "w-full min-w-0 cursor-pointer appearance-none rounded-lg border border-gray-200 bg-white py-2.5 pl-3 pr-10 text-xs font-medium text-gray-700 outline-none transition hover:border-blue-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50";
 
   return (
     <div
@@ -391,7 +398,9 @@ function TaskRow({
       onDragEnd={onDragEnd}
       onDragOver={(event) => onTaskDragOver(event, task._id)}
       onDrop={(event) => onTaskDrop(event, task._id)}
-      className={`relative grid min-w-[950px] grid-cols-[minmax(240px,1fr)_145px_110px_165px_145px] items-center gap-4 border-b border-gray-100 px-5 py-3 transition hover:bg-gray-50 ${
+      className={`relative grid min-w-[1000px] grid-cols-[minmax(270px,1fr)_145px_110px_165px_145px] items-center gap-4 border-b border-gray-100 px-5 py-3 transition ${
+        selected ? "bg-blue-50/60" : "hover:bg-gray-50"
+      } ${
         dropPosition === "before"
           ? "border-t-2 border-t-blue-500"
           : dropPosition === "after"
@@ -399,8 +408,18 @@ function TaskRow({
             : ""
       }`}
     >
-      {/* TASK TITLE */}
-      <div className="flex min-w-0 items-center">
+      <div className="flex min-w-0 items-center gap-3">
+        <input
+          type="checkbox"
+          checked={selected}
+          disabled={moving}
+          onChange={(event) => onSelect(task._id, event.target.checked)}
+          onClick={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          aria-label={`Select ${task.title}`}
+          className="h-4 w-4 shrink-0 cursor-pointer rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed"
+        />
+
         <button
           type="button"
           onClick={() => onTaskOpen(task._id)}
@@ -409,14 +428,12 @@ function TaskRow({
           <span className="shrink-0 font-mono text-xs font-semibold text-blue-600">
             {task.taskKey ?? "Task"}
           </span>
-
           <span className="truncate text-sm font-medium text-gray-800 transition hover:text-blue-600">
             {task.title}
           </span>
         </button>
       </div>
 
-      {/* STATUS */}
       <div className="relative">
         <select
           value={task.status}
@@ -435,7 +452,6 @@ function TaskRow({
             </option>
           ))}
         </select>
-
         <ChevronDown
           size={14}
           aria-hidden="true"
@@ -443,7 +459,6 @@ function TaskRow({
         />
       </div>
 
-      {/* PRIORITY */}
       <div className="relative">
         <select
           value={task.priority}
@@ -464,7 +479,6 @@ function TaskRow({
             </option>
           ))}
         </select>
-
         <ChevronDown
           size={14}
           aria-hidden="true"
@@ -472,7 +486,6 @@ function TaskRow({
         />
       </div>
 
-      {/* ASSIGNEE */}
       <div className="flex min-w-0 items-center gap-2">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[10px] font-semibold text-blue-700">
           {assigneeName === "Unassigned" ? (
@@ -493,17 +506,15 @@ function TaskRow({
             }
             onClick={(event) => event.stopPropagation()}
             onMouseDown={(event) => event.stopPropagation()}
-            className="w-full min-w-0 cursor-pointer appearance-none rounded-md border border-gray-200 bg-white py-2 pl-2 pr-7 text-xs text-gray-700 outline-none transition hover:border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+            className="w-full min-w-0 cursor-pointer appearance-none rounded-lg border border-gray-200 bg-white py-2.5 pl-3 pr-9 text-xs text-gray-700 outline-none transition hover:border-blue-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
             aria-label={`Change assignee for ${task.title}`}
           >
             <option value="">Unassigned</option>
-
             {members.map((member) => (
               <option key={member._id} value={member._id}>
                 {member.name || member.email}
               </option>
             ))}
-
             {getAssigneeId(task) &&
               !members.some(
                 (member) => member._id === getAssigneeId(task)
@@ -513,23 +524,20 @@ function TaskRow({
                 </option>
               )}
           </select>
-
           <ChevronDown
             size={13}
             aria-hidden="true"
-            className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-gray-500"
+            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
           />
         </div>
       </div>
 
-      {/* DUE DATE */}
       <div
         className={`flex min-w-0 items-center gap-2 text-xs ${
           overdue ? "font-semibold text-red-600" : "text-gray-500"
         }`}
       >
         <CalendarDays size={14} className="shrink-0" />
-
         <input
           type="date"
           value={getDateInputValue(task.dueDate)}
@@ -548,6 +556,7 @@ function TaskRow({
     </div>
   );
 }
+
 // ==========================================
 // MAIN SPRINTS VIEW
 // ==========================================
@@ -591,8 +600,11 @@ export default function SprintsView({
   const [deleteSprint, { isLoading: isDeleting }] =
     useDeleteSprintMutation();
 
-  const [setTaskSprint, { isLoading: isMovingTask }] =
-    useSetTaskSprintMutation();
+  const [bulkUpdateTasks, { isLoading: isBulkUpdating }] =
+    useBulkUpdateTasksMutation();
+
+  const [bulkSetTaskSprint, { isLoading: isBulkMoving }] =
+    useBulkSetTaskSprintMutation();
 
   const [showForm, setShowForm] = useState(false);
   const [editingSprintId, setEditingSprintId] = useState<string | null>(null);
@@ -610,12 +622,34 @@ export default function SprintsView({
   const [sprintToDelete, setSprintToDelete] =
     useState<ProjectSprint | null>(null);
 
-  const [moveDestinationId, setMoveDestinationId] = useState("");
+  // ==========================================
+  // MULTI-SELECT AND BULK EDIT STATE
+  // ==========================================
+
+  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
+  const [selectionSourceId, setSelectionSourceId] = useState<string | null>(
+    null
+  );
+
+  const [showBulkEdit, setShowBulkEdit] = useState(false);
+
+  const [bulkValues, setBulkValues] = useState<
+    Record<BulkTaskField, string>
+  >({ ...emptyBulkValues });
+
+  const [bulkError, setBulkError] = useState("");
+
+  const draggedTaskIdsRef = useRef<string[]>([]);
+
   const [draggedTaskId, setDraggedTaskId] = useState("");
+
   const [dragOverDestinationId, setDragOverDestinationId] = useState<
     string | null
   >(null);
+
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+
+  const [moveDestinationId, setMoveDestinationId] = useState("");
 
   const sprints = data?.sprints ?? [];
 
@@ -643,6 +677,9 @@ export default function SprintsView({
 
   const search = searchText.trim().toLowerCase();
 
+  const isMoving = isBulkMoving;
+  const isBusyWithBulk = isBulkUpdating || isBulkMoving;
+
   function filterTasks(tasks: Task[]) {
     return tasks.filter((task) => {
       const matchesSearch =
@@ -659,11 +696,82 @@ export default function SprintsView({
     });
   }
 
+  function getTasksForSource(sourceId: string): Task[] {
+    if (sourceId === BACKLOG_ID) {
+      return filterTasks(data?.backlog ?? []);
+    }
+
+    const sprint = sprints.find((item) => item._id === sourceId);
+
+    return filterTasks(sprint?.tasks ?? []);
+  }
+
+  function getOrderedSelectedIds(taskIds: string[], sourceId: string) {
+    const visibleTasks = getTasksForSource(sourceId);
+    const selected = new Set(taskIds);
+
+    return visibleTasks
+      .filter((task) => selected.has(task._id))
+      .map((task) => task._id);
+  }
+
+  function clearSelection() {
+    setSelectedTaskIds([]);
+    setSelectionSourceId(null);
+    setShowBulkEdit(false);
+    setBulkError("");
+    setBulkValues({ ...emptyBulkValues });
+  }
+
+  function handleSelectTask(
+    taskId: string,
+    checked: boolean,
+    sourceId: string
+  ) {
+    if (checked) {
+      if (selectionSourceId !== sourceId) {
+        setSelectedTaskIds([taskId]);
+        setSelectionSourceId(sourceId);
+        setBulkError("");
+        setBulkValues({ ...emptyBulkValues });
+        setShowBulkEdit(false);
+        return;
+      }
+
+      setSelectedTaskIds((previous) =>
+        previous.includes(taskId) ? previous : [...previous, taskId]
+      );
+
+      setBulkError("");
+      return;
+    }
+
+    setSelectedTaskIds((previous) => {
+      const updatedIds = previous.filter((id) => id !== taskId);
+
+      if (updatedIds.length === 0) {
+        setSelectionSourceId(null);
+        setShowBulkEdit(false);
+        setBulkValues({ ...emptyBulkValues });
+        setBulkError("");
+      }
+
+      return updatedIds;
+    });
+  }
+
   function resetDragState() {
     setDraggedTaskId("");
+    draggedTaskIdsRef.current = [];
     setDragOverDestinationId(null);
     setDropTarget(null);
   }
+
+  useEffect(() => {
+    clearSelection();
+    resetDragState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, searchText, selectedAssigneeId]);
 
   function resetForm() {
     setName("");
@@ -730,9 +838,7 @@ export default function SprintsView({
 
       await refetchSprints();
     } catch (error: unknown) {
-      setErrorMessage(
-        getErrorMessage(error, "Could not update sprint.")
-      );
+      setErrorMessage(getErrorMessage(error, "Could not update sprint."));
       await refetchSprints();
     }
   }
@@ -755,9 +861,7 @@ export default function SprintsView({
 
       await refetchSprints();
     } catch (error: unknown) {
-      setErrorMessage(
-        getErrorMessage(error, "Could not update task.")
-      );
+      setErrorMessage(getErrorMessage(error, "Could not update task."));
       await refetchSprints();
     }
   }
@@ -818,27 +922,129 @@ export default function SprintsView({
     await handleTaskUpdate(taskId, { status });
   }
 
-  async function handleMoveTask(
-    taskId: string,
+  // ==========================================
+  // BULK UPDATE TASK FIELDS
+  // ==========================================
+
+  function updateBulkValue(field: BulkTaskField, value: string) {
+    setBulkValues((previous) => ({
+      ...previous,
+      [field]: value,
+    }));
+
+    setBulkError("");
+  }
+
+  async function handleBulkUpdate() {
+    setBulkError("");
+
+    if (selectedTaskIds.length === 0 || !selectionSourceId) {
+      setBulkError("Select at least one task.");
+      return;
+    }
+
+    const orderedTaskIds = getOrderedSelectedIds(
+      selectedTaskIds,
+      selectionSourceId
+    );
+
+    if (orderedTaskIds.length === 0) {
+      setBulkError("No selected tasks were found.");
+      return;
+    }
+
+    const fieldsToUpdate = (
+      Object.keys(bulkValues) as BulkTaskField[]
+    ).filter((field) => bulkValues[field] !== "");
+
+    if (fieldsToUpdate.length === 0) {
+      setBulkError("Choose at least one field to update.");
+      return;
+    }
+
+    try {
+      for (const field of fieldsToUpdate) {
+        let valueToSend: string | null = bulkValues[field];
+
+        if (
+          field === "assignee" &&
+          bulkValues[field] === UNASSIGNED_VALUE
+        ) {
+          valueToSend = null;
+        }
+
+        if (
+          field === "dueDate" &&
+          bulkValues[field] === CLEAR_DATE_VALUE
+        ) {
+          valueToSend = null;
+        }
+
+        await bulkUpdateTasks({
+          taskIds: orderedTaskIds,
+          field,
+          value: valueToSend,
+        }).unwrap();
+      }
+
+      setBulkValues({ ...emptyBulkValues });
+      setBulkError("");
+      await refetchSprints();
+    } catch (error: unknown) {
+      setBulkError(
+        getErrorMessage(
+          error,
+          "Could not update all selected tasks. Please check the changes and try again."
+        )
+      );
+
+      await refetchSprints();
+    }
+  }
+
+  // ==========================================
+  // GROUP DRAG AND DROP
+  // ==========================================
+
+  function handleTaskDragStart(taskId: string, sourceId: string) {
+    const idsToMove =
+      selectionSourceId === sourceId &&
+      selectedTaskIds.includes(taskId)
+        ? getOrderedSelectedIds(selectedTaskIds, sourceId)
+        : [taskId];
+
+    draggedTaskIdsRef.current = idsToMove;
+    setDraggedTaskId(taskId);
+    setDragOverDestinationId(null);
+    setDropTarget(null);
+  }
+
+  async function handleMoveTasks(
+    taskIds: string[],
     sprintId: string | null,
     targetTaskId?: string,
     position?: DropPosition
   ) {
+    if (taskIds.length === 0 || isBulkMoving) return;
+
+    const orderedTaskIds = [...taskIds];
+
     setErrorMessage("");
 
     try {
-      await setTaskSprint({
+      await bulkSetTaskSprint({
         projectId,
-        taskId,
+        taskIds: orderedTaskIds,
         sprintId,
         ...(targetTaskId ? { targetTaskId } : {}),
         ...(position ? { position } : {}),
       }).unwrap();
 
+      clearSelection();
       await refetchSprints();
     } catch (error: unknown) {
       setErrorMessage(
-        getErrorMessage(error, "Could not update sprint task.")
+        getErrorMessage(error, "Could not move the selected tasks.")
       );
     } finally {
       resetDragState();
@@ -852,7 +1058,7 @@ export default function SprintsView({
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
 
-    setDragOverDestinationId(destinationId ?? "__backlog__");
+    setDragOverDestinationId(destinationId ?? BACKLOG_ID);
     setDropTarget(null);
   }
 
@@ -864,20 +1070,30 @@ export default function SprintsView({
     event.preventDefault();
     event.stopPropagation();
 
-    if (!draggedTaskId || draggedTaskId === taskId) return;
+    const currentDraggedIds = draggedTaskIdsRef.current;
+
+    if (
+      currentDraggedIds.length === 0 ||
+      currentDraggedIds.includes(taskId)
+    ) {
+      return;
+    }
 
     event.dataTransfer.dropEffect = "move";
 
     const bounds = event.currentTarget.getBoundingClientRect();
     const midpoint = bounds.top + bounds.height / 2;
+
     const position: DropPosition =
       event.clientY < midpoint ? "before" : "after";
 
-    setDragOverDestinationId(destinationId ?? "__backlog__");
+    const destination = destinationId ?? BACKLOG_ID;
+
+    setDragOverDestinationId(destination);
     setDropTarget({
       taskId,
       position,
-      destinationId: destinationId ?? "__backlog__",
+      destinationId: destination,
     });
   }
 
@@ -889,10 +1105,13 @@ export default function SprintsView({
     event.preventDefault();
     event.stopPropagation();
 
-    const taskId =
-      event.dataTransfer.getData("text/plain") || draggedTaskId;
+    const taskIds = [...draggedTaskIdsRef.current];
 
-    if (!taskId || taskId === targetTaskId || isMovingTask) {
+    if (
+      taskIds.length === 0 ||
+      taskIds.includes(targetTaskId) ||
+      isBulkMoving
+    ) {
       resetDragState();
       return;
     }
@@ -908,11 +1127,12 @@ export default function SprintsView({
 
     const bounds = event.currentTarget.getBoundingClientRect();
     const midpoint = bounds.top + bounds.height / 2;
+
     const position: DropPosition =
       event.clientY < midpoint ? "before" : "after";
 
-    await handleMoveTask(
-      taskId,
+    await handleMoveTasks(
+      taskIds,
       destinationSprintId,
       targetTaskId,
       position
@@ -926,28 +1146,9 @@ export default function SprintsView({
     event.preventDefault();
     event.stopPropagation();
 
-    const taskId =
-      event.dataTransfer.getData("text/plain") || draggedTaskId;
+    const taskIds = [...draggedTaskIdsRef.current];
 
-    if (!taskId || isMovingTask) {
-      resetDragState();
-      return;
-    }
-
-    const sourceSprint = sprints.find((sprint) =>
-      sprint.tasks.some((task) => task._id === taskId)
-    );
-
-    const isInBacklog = (data?.backlog ?? []).some(
-      (task) => task._id === taskId
-    );
-
-    const sourceKey =
-      sourceSprint?._id ?? (isInBacklog ? "__backlog__" : null);
-
-    const destinationKey = destinationSprintId ?? "__backlog__";
-
-    if (sourceKey === destinationKey) {
+    if (taskIds.length === 0 || isBulkMoving) {
       resetDragState();
       return;
     }
@@ -961,8 +1162,12 @@ export default function SprintsView({
       return;
     }
 
-    await handleMoveTask(taskId, destinationSprintId);
+    await handleMoveTasks(taskIds, destinationSprintId);
   }
+
+  // ==========================================
+  // START / COMPLETE / DELETE SPRINT
+  // ==========================================
 
   async function handleStart(sprint: ProjectSprint) {
     setErrorMessage("");
@@ -975,9 +1180,7 @@ export default function SprintsView({
 
       await refetchSprints();
     } catch (error: unknown) {
-      setErrorMessage(
-        getErrorMessage(error, "Could not start sprint.")
-      );
+      setErrorMessage(getErrorMessage(error, "Could not start sprint."));
     }
   }
 
@@ -989,7 +1192,7 @@ export default function SprintsView({
         projectId,
         sprintId: sprint._id,
         moveIncompleteToSprintId:
-          moveDestinationId === "__backlog__"
+          moveDestinationId === BACKLOG_ID
             ? null
             : moveDestinationId || null,
       }).unwrap();
@@ -998,9 +1201,7 @@ export default function SprintsView({
       setMoveDestinationId("");
       await refetchSprints();
     } catch (error: unknown) {
-      setErrorMessage(
-        getErrorMessage(error, "Could not complete sprint.")
-      );
+      setErrorMessage(getErrorMessage(error, "Could not complete sprint."));
     }
   }
 
@@ -1012,7 +1213,7 @@ export default function SprintsView({
         projectId,
         sprintId: sprint._id,
         moveTasksToSprintId:
-          moveDestinationId === "__backlog__"
+          moveDestinationId === BACKLOG_ID
             ? null
             : moveDestinationId || null,
       }).unwrap();
@@ -1021,9 +1222,7 @@ export default function SprintsView({
       setMoveDestinationId("");
       await refetchSprints();
     } catch (error: unknown) {
-      setErrorMessage(
-        getErrorMessage(error, "Could not delete sprint.")
-      );
+      setErrorMessage(getErrorMessage(error, "Could not delete sprint."));
     }
   }
 
@@ -1048,33 +1247,213 @@ export default function SprintsView({
 
   const backlogTasks = filterTasks(data?.backlog ?? []);
 
+  // ==========================================
+  // BULK EDIT PANEL FIELDS
+  // ==========================================
+
+  const bulkFieldLabels: Record<BulkTaskField, string> = {
+    status: "Status",
+    priority: "Priority",
+    type: "Task type",
+    assignee: "Assignee",
+    dueDate: "Due date",
+  };
+
+  const bulkSelectClass =
+    "w-full appearance-none rounded-lg border border-gray-200 bg-white py-2.5 pl-3 pr-10 text-sm text-gray-700 outline-none transition hover:border-blue-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50";
+
+  function renderBulkSelect(
+    field: BulkTaskField,
+    children: React.ReactNode
+  ) {
+    return (
+      <div className="relative">
+        <select
+          id={`bulk-${field}`}
+          value={bulkValues[field]}
+          onChange={(event) =>
+            updateBulkValue(field, event.target.value)
+          }
+          disabled={isBulkUpdating}
+          className={bulkSelectClass}
+        >
+          {children}
+        </select>
+
+        <ChevronDown
+          size={15}
+          aria-hidden="true"
+          className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+        />
+      </div>
+    );
+  }
+
+  function renderBulkField(field: BulkTaskField) {
+    return (
+      <div key={field} className="min-w-0 space-y-2">
+        <label
+          htmlFor={`bulk-${field}`}
+          className="block text-sm font-semibold text-gray-800"
+        >
+          {bulkFieldLabels[field]}
+        </label>
+
+        {field === "status" &&
+          renderBulkSelect(
+            "status",
+            <>
+              <option value="">Keep existing status</option>
+              {taskStatuses.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </>
+          )}
+
+        {field === "priority" &&
+          renderBulkSelect(
+            "priority",
+            <>
+              <option value="">Keep existing priority</option>
+              {taskPriorities.map((priority) => (
+                <option key={priority} value={priority}>
+                  {priority}
+                </option>
+              ))}
+            </>
+          )}
+
+        {field === "type" &&
+          renderBulkSelect(
+            "type",
+            <>
+              <option value="">Keep existing task type</option>
+              {taskTypes.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </>
+          )}
+
+        {field === "assignee" &&
+          renderBulkSelect(
+            "assignee",
+            <>
+              <option value="">Keep existing assignee</option>
+              <option value={UNASSIGNED_VALUE}>Unassigned</option>
+              {members.map((member) => (
+                <option key={member._id} value={member._id}>
+                  {member.name || member.email}
+                </option>
+              ))}
+            </>
+          )}
+
+        {field === "dueDate" && (
+          <div className="space-y-2">
+            <input
+              id="bulk-dueDate"
+              type="date"
+              value={
+                bulkValues.dueDate === CLEAR_DATE_VALUE
+                  ? ""
+                  : bulkValues.dueDate
+              }
+              onChange={(event) =>
+                updateBulkValue("dueDate", event.target.value)
+              }
+              disabled={isBulkUpdating}
+              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 outline-none transition hover:border-blue-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:opacity-50"
+            />
+
+            <button
+              type="button"
+              onClick={() =>
+                updateBulkValue("dueDate", CLEAR_DATE_VALUE)
+              }
+              disabled={isBulkUpdating}
+              className={`w-full rounded-lg border px-3 py-2 text-xs font-medium transition ${
+                bulkValues.dueDate === CLEAR_DATE_VALUE
+                  ? "border-blue-300 bg-blue-50 text-blue-700"
+                  : "border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50"
+              }`}
+            >
+              Clear due date
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <section className="w-full space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold text-gray-900">
-          Project Sprints
-        </h2>
+      {/* PAGE HEADER */}
 
-        <button
-          type="button"
-          onClick={() => {
-            if (showForm) {
-              resetForm();
-            } else {
-              setEditingSprintId(null);
-              setName("");
-              setGoal("");
-              setStartDate("");
-              setEndDate("");
-              setErrorMessage("");
-              setShowForm(true);
-            }
-          }}
-          className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
-        >
-          {showForm ? <X size={16} /> : <Plus size={16} />}
-          {showForm ? "Close form" : "New sprint"}
-        </button>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">
+            Project Sprints
+          </h2>
+
+          {selectedTaskIds.length > 0 && (
+            <p className="mt-1 text-xs text-blue-600">
+              {selectedTaskIds.length} task(s) selected
+            </p>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {selectedTaskIds.length > 0 && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowBulkEdit(true);
+                  setBulkError("");
+                }}
+                disabled={isBusyWithBulk}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+              >
+                <Pencil size={15} />
+                Edit Fields
+              </button>
+
+              <button
+                type="button"
+                onClick={clearSelection}
+                disabled={isBusyWithBulk}
+                className="rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Clear selection
+              </button>
+            </>
+          )}
+
+          <button
+            type="button"
+            onClick={() => {
+              if (showForm) {
+                resetForm();
+              } else {
+                setEditingSprintId(null);
+                setName("");
+                setGoal("");
+                setStartDate("");
+                setEndDate("");
+                setErrorMessage("");
+                setShowForm(true);
+              }
+            }}
+            className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+          >
+            {showForm ? <X size={16} /> : <Plus size={16} />}
+            {showForm ? "Close form" : "New sprint"}
+          </button>
+        </div>
       </div>
 
       {errorMessage && (
@@ -1085,6 +1464,8 @@ export default function SprintsView({
           {errorMessage}
         </p>
       )}
+
+      {/* CREATE / EDIT SPRINT FORM */}
 
       {showForm && (
         <form
@@ -1175,6 +1556,8 @@ export default function SprintsView({
           </div>
         </form>
       )}
+
+      {/* SPRINTS */}
 
       {orderedSprints.length === 0 ? (
         <div className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">
@@ -1327,11 +1710,14 @@ export default function SprintsView({
                           onTaskUpdate={handleTaskUpdate}
                           onStatusChange={handleStatusChange}
                           updatingStatus={isUpdatingTask}
-                          moving={isMovingTask}
-                          onDragStart={(taskId) => {
-                            setDraggedTaskId(taskId);
-                            setDropTarget(null);
-                          }}
+                          moving={isMoving}
+                          selected={selectedTaskIds.includes(task._id)}
+                          onSelect={(taskId, checked) =>
+                            handleSelectTask(taskId, checked, sprint._id)
+                          }
+                          onDragStart={(taskId) =>
+                            handleTaskDragStart(taskId, sprint._id)
+                          }
                           onDragEnd={resetDragState}
                           onTaskDragOver={(event, taskId) =>
                             handleTaskDragOver(event, taskId, sprint._id)
@@ -1356,14 +1742,11 @@ export default function SprintsView({
         </div>
       )}
 
-      {/* ========================================== */}
       {/* BACKLOG */}
-      {/* ========================================== */}
 
       <section className="w-full overflow-hidden rounded-xl border border-gray-200 bg-white">
         <header className="border-b border-gray-100 px-5 py-4">
           <h3 className="font-semibold text-gray-900">Backlog</h3>
-
           <p className="mt-1 text-xs text-gray-500">
             Unscheduled project tasks
           </p>
@@ -1384,11 +1767,9 @@ export default function SprintsView({
                 setDropTarget(null);
               }
             }}
-            onDrop={(event) =>
-              void handleDropOnEmptyArea(event, null)
-            }
+            onDrop={(event) => void handleDropOnEmptyArea(event, null)}
             className={`min-h-16 divide-y divide-gray-100 border-t-2 transition-colors ${
-              dragOverDestinationId === "__backlog__"
+              dragOverDestinationId === BACKLOG_ID
                 ? "border-blue-500"
                 : "border-transparent"
             }`}
@@ -1411,11 +1792,14 @@ export default function SprintsView({
                   onTaskUpdate={handleTaskUpdate}
                   onStatusChange={handleStatusChange}
                   updatingStatus={isUpdatingTask}
-                  moving={isMovingTask}
-                  onDragStart={(taskId) => {
-                    setDraggedTaskId(taskId);
-                    setDropTarget(null);
-                  }}
+                  moving={isMoving}
+                  selected={selectedTaskIds.includes(task._id)}
+                  onSelect={(taskId, checked) =>
+                    handleSelectTask(taskId, checked, BACKLOG_ID)
+                  }
+                  onDragStart={(taskId) =>
+                    handleTaskDragStart(taskId, BACKLOG_ID)
+                  }
                   onDragEnd={resetDragState}
                   onTaskDragOver={(event, taskId) =>
                     handleTaskDragOver(event, taskId, null)
@@ -1425,7 +1809,7 @@ export default function SprintsView({
                   }
                   dropPosition={
                     dropTarget?.taskId === task._id &&
-                    dropTarget.destinationId === "__backlog__"
+                    dropTarget.destinationId === BACKLOG_ID
                       ? dropTarget.position
                       : null
                   }
@@ -1436,9 +1820,102 @@ export default function SprintsView({
         </div>
       </section>
 
-      {/* ========================================== */}
+      {/* BULK EDIT SIDE PANEL */}
+
+      {showBulkEdit && selectedTaskIds.length > 0 && (
+        <div className="fixed inset-0 z-[150]">
+          <button
+            type="button"
+            aria-label="Close bulk edit panel"
+            onClick={() => setShowBulkEdit(false)}
+            disabled={isBusyWithBulk}
+            className="absolute inset-0 bg-gray-950/40 backdrop-blur-[2px]"
+          />
+
+          <aside className="absolute right-0 top-0 flex h-full w-full max-w-md flex-col border-l border-gray-200 bg-white shadow-2xl">
+            {/* PANEL HEADER */}
+
+            <header className="flex items-center justify-between border-b border-gray-100 px-6 py-5">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                  <ListChecks size={20} />
+                </div>
+
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    Edit selected tasks
+                  </h3>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Update multiple tasks at once
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowBulkEdit(false)}
+                disabled={isBusyWithBulk}
+                className="rounded-lg p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
+                aria-label="Close bulk edit panel"
+              >
+                <X size={20} />
+              </button>
+            </header>
+
+            {/* PANEL CONTENT */}
+
+            <div className="flex-1 space-y-5 overflow-y-auto p-6">
+              
+              {bulkError && (
+                <p
+                  role="alert"
+                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700"
+                >
+                  {bulkError}
+                </p>
+              )}
+
+              <div className="space-y-5">
+                {renderBulkField("status")}
+                {renderBulkField("priority")}
+                {renderBulkField("type")}
+                {renderBulkField("assignee")}
+                {renderBulkField("dueDate")}
+              </div>
+            </div>
+
+            {/* PANEL FOOTER */}
+
+            <footer className="space-y-3 border-t border-gray-100 bg-white px-6 py-5">
+              <button
+                type="button"
+                onClick={() => void handleBulkUpdate()}
+                disabled={
+                  isBulkUpdating ||
+                  Object.values(bulkValues).every((value) => value === "")
+                }
+                className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isBulkUpdating ? "Applying changes…" : "Apply changes"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowBulkEdit(false);
+                  setBulkError("");
+                }}
+                disabled={isBulkUpdating}
+                className="w-full rounded-lg border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-600 transition hover:bg-gray-50 hover:text-gray-800 disabled:opacity-50"
+              >
+                Close
+              </button>
+            </footer>
+          </aside>
+        </div>
+      )}
+
       {/* COMPLETE / DELETE SPRINT MODAL */}
-      {/* ========================================== */}
 
       {(sprintToComplete || sprintToDelete) && (
         <div
@@ -1492,7 +1969,7 @@ export default function SprintsView({
                           Choose a destination
                         </option>
 
-                        <option value="__backlog__">Backlog</option>
+                        <option value={BACKLOG_ID}>Backlog</option>
 
                         {sprints
                           .filter(
@@ -1583,7 +2060,7 @@ export default function SprintsView({
                         Choose a destination
                       </option>
 
-                      <option value="__backlog__">Backlog</option>
+                      <option value={BACKLOG_ID}>Backlog</option>
 
                       {sprints
                         .filter(

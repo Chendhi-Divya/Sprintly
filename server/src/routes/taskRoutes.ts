@@ -6,6 +6,7 @@ import {
   getTasks,
   getTaskById,
   updateTask,
+  bulkUpdateTasks,
   deleteTask,
   getTaskComments,
   addTaskComment,
@@ -28,7 +29,10 @@ import upload from "../middleware/taskUpload.js";
 
 const router = express.Router();
 
-// Create a new task
+// ==========================================
+// CREATE TASK
+// ==========================================
+
 router.post(
   "/",
   protect,
@@ -36,14 +40,31 @@ router.post(
   createTask
 );
 
-// Get all tasks with filtering and pagination
+// ==========================================
+// GET ALL TASKS
+// ==========================================
+
 router.get(
   "/",
   protect,
   getTasks
 );
 
-// Upload an attachment to a task
+// ==========================================
+// BULK UPDATE SELECTED TASKS
+// Must be before /:id routes
+// ==========================================
+
+router.patch(
+  "/bulk-update",
+  protect,
+  bulkUpdateTasks
+);
+
+// ==========================================
+// TASK ATTACHMENTS
+// ==========================================
+
 router.post(
   "/:id/attachments",
   protect,
@@ -52,7 +73,6 @@ router.post(
   uploadTaskAttachment
 );
 
-// View or download a task attachment
 router.get(
   "/:id/attachments/:fileId",
   protect,
@@ -60,7 +80,6 @@ router.get(
   getTaskAttachment
 );
 
-// Delete a task attachment
 router.delete(
   "/:id/attachments/:fileId",
   protect,
@@ -68,7 +87,10 @@ router.delete(
   deleteTaskAttachment
 );
 
-// Get comments for a task
+// ==========================================
+// TASK COMMENTS
+// ==========================================
+
 router.get(
   "/:id/comments",
   protect,
@@ -76,7 +98,6 @@ router.get(
   getTaskComments
 );
 
-// Add a comment to a task
 router.post(
   "/:id/comments",
   protect,
@@ -84,7 +105,10 @@ router.post(
   addTaskComment
 );
 
-// Get a single task with its details and subtasks
+// ==========================================
+// GET SINGLE TASK
+// ==========================================
+
 router.get(
   "/:id",
   protect,
@@ -92,7 +116,10 @@ router.get(
   getTaskById
 );
 
-// Update a task, including its status and description
+// ==========================================
+// UPDATE TASK
+// ==========================================
+
 router.put(
   "/:id",
   protect,
@@ -100,7 +127,10 @@ router.put(
   updateTask
 );
 
-// Delete a task
+// ==========================================
+// DELETE TASK
+// ==========================================
+
 router.delete(
   "/:id",
   protect,

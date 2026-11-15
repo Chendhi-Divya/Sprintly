@@ -824,3 +824,289 @@ export const setTaskSprint = async (req: Request, res: Response) => {
     });
   }
 };
+
+// MOVE MULTIPLE TASKS TO A SPRINT OR BACKLOG, PRESERVING THEIR ORDER
+export const bulkSetTaskSprint = async (req: Request, res: Response) => {
+  try {
+    const access = await getAuthorizedProject(req, res);
+    if (!access) return;
+
+    const { taskIds, sprintId, targetTaskId, position } = req.body;
+
+    if (
+      !Array.isArray(taskIds) ||
+      taskIds.length === 0 ||
+      taskIds.length > 100 ||
+      !taskIds.every(
+        (id: unknown) =>
+          typeof id === "string" && mongoose.isValidObjectId(id)
+      )
+    ) {
+      return res.status(400).json({
+        message: "Provide between 1 and 100 valid task IDs",
+      });
+    }
+
+    const uniqueTaskIds = [...new Set(taskIds)] as string[];
+
+    if (uniqueTaskIds.length !== taskIds.length) {
+      return res.status(400).json({
+        message: "Duplicate task IDs are not allowed",
+      });
+    }
+
+    if (
+      position !== undefined &&
+      position !== null &&
+      position !== "before" &&
+      position !== "after"
+    ) {
+      return res.status(400).json({
+        message: "Position must be either before or after",
+      });
+    }
+
+    if (
+      targetTaskId !== undefined &&
+      targetTaskId !== null &&
+      targetTaskId !== "" &&
+      !mongoose.isValidObjectId(targetTaskId)
+    ) {
+      return res.status(400).json({ message: "Invalid target task ID" });
+    }
+
+    if (targetTaskId && uniqueTaskIds.includes(targetTaskId)) {
+      return res.status(400).json({
+        message: "The target task cannot be part of the selected tasks",
+      });
+    }
+
+    let destinationSprint: InstanceType<typeof Sprint> | null = null;
+    let destinationSprintId: string | null = null;
+
+    if (sprintId !== null && sprintId !== "") {
+      if (
+        typeof sprintId !== "string" ||
+        !mongoose.isValidObjectId(sprintId)
+      ) {
+        return res.status(400).json({ message: "Invalid sprint ID" });
+      }
+
+      destinationSprint = await Sprint.findOne({
+        _id: sprintId,
+        project: access.project._id,
+      });
+
+      if (!destinationSprint) {
+        return res.status(404).json({ message: "Sprint not found" });
+      }
+
+      if (destinationSprint.status === "Completed") {
+        return res.status(400).json({
+          message: "Tasks cannot be added to a completed sprint",
+        });
+      }
+
+      destinationSprintId = destinationSprint._id.toString();
+    }
+
+    const selectedTasks = await Task.find({
+      _id: { $in: uniqueTaskIds },
+      project: access.project._id,
+    });
+
+    if (selectedTasks.length !== uniqueTaskIds.length) {
+      return res.status(404).json({
+        message: "One or more tasks were not found in this project",
+      });
+    }
+
+    // The selected tasks must all come from the same sprint or backlog.
+    const sourceSprintIds = new Set(
+      selectedTasks.map((task) => task.sprint?.toString() ?? "__backlog__")
+    );
+
+    if (sourceSprintIds.size !== 1) {
+      return res.status(400).json({
+        message: "Selected tasks must belong to the same sprint or backlog",
+      });
+    }
+
+    const sourceKey = [...sourceSprintIds][0];
+    const previousSprintId =
+      sourceKey === "__backlog__" ? null : sourceKey;
+
+    // Keep the exact order supplied by the frontend.
+    const selectedTaskMap = new Map(
+      selectedTasks.map((task) => [task._id.toString(), task])
+    );
+
+    const orderedSelectedTasks = uniqueTaskIds.map(
+      (id) => selectedTaskMap.get(id)!
+    );
+
+    const sameList = previousSprintId === destinationSprintId;
+
+    const destinationFilter = destinationSprintId
+      ? {
+          project: access.project._id,
+          sprint: new mongoose.Types.ObjectId(destinationSprintId),
+        }
+      : {
+          project: access.project._id,
+          sprint: null,
+        };
+
+    // Exclude selected tasks before calculating the insertion position.
+    const destinationTasks = await Task.find({
+      ...destinationFilter,
+      _id: { $nin: uniqueTaskIds },
+    }).sort({ position: 1, createdAt: 1, _id: 1 });
+
+    const reorderedDestination = [...destinationTasks];
+
+    let insertIndex = reorderedDestination.length;
+
+    if (targetTaskId) {
+      const targetIndex = reorderedDestination.findIndex(
+        (task) => task._id.toString() === targetTaskId
+      );
+
+      if (targetIndex === -1) {
+        return res.status(400).json({
+          message: "Target task does not belong to the destination list",
+        });
+      }
+
+      insertIndex =
+        position === "after" ? targetIndex + 1 : targetIndex;
+    }
+
+    reorderedDestination.splice(
+      insertIndex,
+      0,
+      ...orderedSelectedTasks
+    );
+
+    const operations: any[] = [];
+
+    // Close the gap in the source list when moving to another list.
+    if (!sameList) {
+      const sourceFilter = previousSprintId
+        ? {
+            project: access.project._id,
+            sprint: new mongoose.Types.ObjectId(previousSprintId),
+          }
+        : {
+            project: access.project._id,
+            sprint: null,
+          };
+
+      const remainingSourceTasks = await Task.find({
+        ...sourceFilter,
+        _id: { $nin: uniqueTaskIds },
+      }).sort({ position: 1, createdAt: 1, _id: 1 });
+
+      remainingSourceTasks.forEach((task, index) => {
+        operations.push({
+          updateOne: {
+            filter: {
+              _id: task._id,
+              project: access.project._id,
+            },
+            update: { $set: { position: index } },
+          },
+        });
+      });
+    }
+
+    // Save the complete destination order.
+    reorderedDestination.forEach((task, index) => {
+      const isSelected = uniqueTaskIds.includes(task._id.toString());
+
+      const update: any = {
+        $set: { position: index },
+      };
+
+      if (isSelected) {
+        if (destinationSprint) {
+          update.$set.sprint = destinationSprint._id;
+        } else {
+          update.$unset = { sprint: 1 };
+        }
+      }
+
+      operations.push({
+        updateOne: {
+          filter: {
+            _id: task._id,
+            project: access.project._id,
+          },
+          update,
+        },
+      });
+    });
+
+    if (operations.length > 0) {
+      await Task.bulkWrite(operations);
+    }
+
+    // Keep Sprint.tasks references in sync.
+    if (!sameList) {
+      if (previousSprintId) {
+        await Sprint.updateOne(
+          {
+            _id: previousSprintId,
+            project: access.project._id,
+          },
+          {
+            $pull: { tasks: { $in: uniqueTaskIds } },
+          }
+        );
+      }
+
+      if (destinationSprintId) {
+        await Sprint.updateOne(
+          {
+            _id: destinationSprintId,
+            project: access.project._id,
+          },
+          {
+            $addToSet: {
+              tasks: {
+                $each: uniqueTaskIds.map(
+                  (id) => new mongoose.Types.ObjectId(id)
+                ),
+              },
+            },
+          }
+        );
+      }
+    }
+
+    const updatedTasks = await Task.find({
+      _id: { $in: uniqueTaskIds },
+      project: access.project._id,
+    })
+      .populate("project", "name key")
+      .populate("assignee", "name email")
+      .populate("reporter", "name email")
+      .populate("parentTask", "title taskKey type")
+      .populate("sprint", "title status");
+
+    // Return tasks in the same order in which they were selected.
+    const updatedTaskMap = new Map(
+      updatedTasks.map((task) => [task._id.toString(), task])
+    );
+
+    return res.status(200).json({
+      message: "Tasks moved successfully",
+      tasks: uniqueTaskIds.map((id) => updatedTaskMap.get(id)),
+    });
+  } catch (error) {
+    console.error("BULK SET TASK SPRINT ERROR:", error);
+    return res.status(500).json({
+      message: "Failed to move selected tasks",
+    });
+  }
+};
