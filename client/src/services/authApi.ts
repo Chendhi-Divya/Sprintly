@@ -243,12 +243,12 @@ export const authApi = createApi({
     }),
   }),
 });
-
 export const {
   useRegisterMutation,
   useVerifyEmailMutation,
   useLoginMutation,
   useGetCurrentUserQuery,
+  useLazyGetCurrentUserQuery,
   useUpdateProfileMutation,
   useRequestEmailChangeMutation,
   useVerifyEmailChangeOTPMutation,

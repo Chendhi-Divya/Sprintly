@@ -460,8 +460,8 @@ export default function TaskBoard({
                       setDraggedTaskId(null);
 
                       if (task && task.status !== status) {
-                        void handleStatusChange(taskId, status);
-                      }
+  void handleStatusChange(task._id, status);
+}
                     }}
                     className={`min-h-80 rounded-xl border p-3 transition-colors ${
                       dragOverStatus === status

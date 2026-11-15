@@ -52,6 +52,7 @@ type ProjectMember = {
 
 type EditableTaskFields = {
   title?: string;
+  status?: TaskStatus;
   priority?: TaskPriority;
   assignee?: string | null;
   dueDate?: string | null;
