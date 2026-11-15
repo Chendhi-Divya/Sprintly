@@ -1,3 +1,4 @@
+
 import mongoose, { Schema, Document } from "mongoose";
 
 export interface IProject extends Document {
@@ -20,7 +21,6 @@ const projectSchema = new Schema<IProject>(
     key: {
       type: String,
       required: true,
-      unique: true,
       uppercase: true,
       trim: true,
       minlength: 2,
@@ -43,20 +43,26 @@ const projectSchema = new Schema<IProject>(
       required: true,
     },
 
-   members: {
-  type: [
-    {
-      type: Schema.Types.ObjectId,
-      ref: "User",
+    members: {
+      type: [
+        {
+          type: Schema.Types.ObjectId,
+          ref: "User",
+        },
+      ],
+      default: [],
     },
-  ],
-  default: [],
-},
   },
   {
     timestamps: true,
     versionKey: false,
   }
+);
+
+// Project keys must be unique only within the same organization.
+projectSchema.index(
+  { organization: 1, key: 1 },
+  { unique: true }
 );
 
 const Project = mongoose.model<IProject>("Project", projectSchema);

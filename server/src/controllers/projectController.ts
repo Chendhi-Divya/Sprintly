@@ -31,6 +31,7 @@ function makeProjectKey(name: string): string {
 // Example: SD, SD2, SD3
 async function getUniqueProjectKey(
   name: string,
+  organization: string,
   excludeProjectId?: mongoose.Types.ObjectId
 ): Promise<string> {
   const baseKey = makeProjectKey(name);
@@ -41,6 +42,7 @@ async function getUniqueProjectKey(
   while (
     await Project.exists({
       key,
+      organization,
       ...(excludeProjectId
         ? { _id: { $ne: excludeProjectId } }
         : {}),
@@ -277,8 +279,9 @@ export const createProject = async (
     }
 
     const existingProject = await Project.exists({
-      key: projectKey,
-    });
+  key: projectKey,
+  organization: selectedOrganization.org_id,
+});
 
     if (existingProject) {
       return res.status(409).json({
@@ -428,7 +431,10 @@ export const getProjects = async (
         await ensureDefaultProjectMembers(project, organization);
 
         if (!project.key) {
-          project.key = await getUniqueProjectKey(project.name);
+          project.key = await getUniqueProjectKey(
+  project.name,
+  project.organization
+);
           await project.save();
         }
 
@@ -660,10 +666,11 @@ export const updateProject = async (
         });
       }
 
-      const existingProject = await Project.exists({
-        key: projectKey,
-        _id: { $ne: project._id },
-      });
+     const existingProject = await Project.exists({
+  key: projectKey,
+  organization: project.organization,
+  _id: { $ne: project._id },
+});
 
       if (existingProject) {
         return res.status(409).json({
@@ -745,12 +752,11 @@ export const updateProject = async (
   } catch (error) {
     console.error("UPDATE PROJECT ERROR:", error);
 
-    if ((error as any)?.code === 11000) {
-      return res.status(409).json({
-        message: "That project issue key is already in use",
-      });
-    }
-
+  if ((error as any)?.code === 11000) {
+  return res.status(409).json({
+    message: "This project key is already in use in this organization.",
+  });
+}
     return res.status(500).json({
       message: "Failed to update project",
       error: error instanceof Error ? error.message : error,

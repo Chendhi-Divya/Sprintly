@@ -10,6 +10,7 @@ import {
   X,
   ListChecks,
 } from "lucide-react";
+import DatePicker from "../components/DatePicker";
 
 import {
   useCompleteSprintMutation,
@@ -305,38 +306,39 @@ function EditableSprintDetails({
       </div>
 
       <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
-        <label className="inline-flex items-center gap-1.5">
+        <div className="inline-flex items-center gap-1.5">
           <CalendarDays size={13} />
           <span>From</span>
-          <input
-            type="date"
-            value={getDateInputValue(sprint.startDate)}
-            disabled={disabled}
-            onChange={(event) =>
-              onUpdate({ startDate: event.target.value || null })
-            }
-            className="max-w-[135px] rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 outline-none focus:border-blue-500 disabled:opacity-50"
-          />
-        </label>
 
-        <label className="inline-flex items-center gap-1.5">
-          <span>To</span>
-          <input
-            type="date"
-            value={getDateInputValue(sprint.endDate)}
-            min={getDateInputValue(sprint.startDate) || undefined}
-            disabled={disabled}
-            onChange={(event) =>
-              onUpdate({ endDate: event.target.value || null })
+          <DatePicker
+            value={getDateInputValue(sprint.startDate)}
+            onChange={(value) =>
+              onUpdate({ startDate: value || null })
             }
-            className="max-w-[135px] rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 outline-none focus:border-blue-500 disabled:opacity-50"
+            disabled={disabled}
+            placeholder="Start date"
+            className="w-[145px]"
           />
-        </label>
+        </div>
+
+        <div className="inline-flex items-center gap-1.5">
+          <span>To</span>
+
+          <DatePicker
+            value={getDateInputValue(sprint.endDate)}
+            onChange={(value) =>
+              onUpdate({ endDate: value || null })
+            }
+            min={getDateInputValue(sprint.startDate)}
+            disabled={disabled}
+            placeholder="End date"
+            className="w-[145px]"
+          />
+        </div>
       </div>
     </div>
   );
 }
-
 // ==========================================
 // TASK ROW
 // ==========================================
@@ -537,21 +539,17 @@ function TaskRow({
           overdue ? "font-semibold text-red-600" : "text-gray-500"
         }`}
       >
-        <CalendarDays size={14} className="shrink-0" />
-        <input
-          type="date"
-          value={getDateInputValue(task.dueDate)}
-          disabled={moving}
-          onChange={(event) =>
-            onTaskUpdate(task._id, {
-              dueDate: event.target.value || null,
-            })
-          }
-          onClick={(event) => event.stopPropagation()}
-          onMouseDown={(event) => event.stopPropagation()}
-          className="min-w-0 w-full cursor-pointer rounded-md border border-gray-200 bg-white px-2 py-2 text-xs text-gray-600 outline-none transition hover:border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:opacity-50"
-          aria-label={`Change due date for ${task.title}`}
-        />
+        <DatePicker
+  value={getDateInputValue(task.dueDate)}
+  onChange={(value) =>
+    onTaskUpdate(task._id, {
+      dueDate: value || null,
+    })
+  }
+  disabled={moving}
+  placeholder="Select date"
+  className="w-full min-w-0"
+/>
       </div>
     </div>
   );
@@ -1352,39 +1350,36 @@ export default function SprintsView({
             </>
           )}
 
-        {field === "dueDate" && (
-          <div className="space-y-2">
-            <input
-              id="bulk-dueDate"
-              type="date"
-              value={
-                bulkValues.dueDate === CLEAR_DATE_VALUE
-                  ? ""
-                  : bulkValues.dueDate
-              }
-              onChange={(event) =>
-                updateBulkValue("dueDate", event.target.value)
-              }
-              disabled={isBulkUpdating}
-              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 outline-none transition hover:border-blue-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:opacity-50"
-            />
+     {field === "dueDate" && (
+  <div className="space-y-2">
+    <DatePicker
+      value={
+        bulkValues.dueDate === CLEAR_DATE_VALUE
+          ? ""
+          : bulkValues.dueDate
+      }
+      onChange={(value) => updateBulkValue("dueDate", value)}
+      disabled={isBulkUpdating}
+      placeholder="Select due date"
+      className="w-full"
+    />
 
-            <button
-              type="button"
-              onClick={() =>
-                updateBulkValue("dueDate", CLEAR_DATE_VALUE)
-              }
-              disabled={isBulkUpdating}
-              className={`w-full rounded-lg border px-3 py-2 text-xs font-medium transition ${
-                bulkValues.dueDate === CLEAR_DATE_VALUE
-                  ? "border-blue-300 bg-blue-50 text-blue-700"
-                  : "border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50"
-              }`}
-            >
-              Clear due date
-            </button>
-          </div>
-        )}
+    <button
+      type="button"
+      onClick={() =>
+        updateBulkValue("dueDate", CLEAR_DATE_VALUE)
+      }
+      disabled={isBulkUpdating}
+      className={`w-full rounded-lg border px-3 py-2 text-xs font-medium transition ${
+        bulkValues.dueDate === CLEAR_DATE_VALUE
+          ? "border-blue-300 bg-blue-50 text-blue-700"
+          : "border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50"
+      }`}
+    >
+      Clear due date
+    </button>
+  </div>
+)}
       </div>
     );
   }
@@ -1512,25 +1507,33 @@ export default function SprintsView({
           </label>
 
           <label className="space-y-1 text-sm font-medium text-gray-700">
-            From
-            <input
-              type="date"
-              value={startDate}
-              onChange={(event) => setStartDate(event.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2.5 font-normal outline-none focus:border-blue-500"
-            />
-          </label>
+  From
 
-          <label className="space-y-1 text-sm font-medium text-gray-700">
-            To
-            <input
-              type="date"
-              value={endDate}
-              onChange={(event) => setEndDate(event.target.value)}
-              min={startDate || undefined}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2.5 font-normal outline-none focus:border-blue-500"
-            />
-          </label>
+  <DatePicker
+    value={startDate}
+    onChange={(value) => {
+      setStartDate(value);
+
+      if (endDate && value && endDate < value) {
+        setEndDate("");
+      }
+    }}
+    placeholder="Select start date"
+    className="w-full"
+  />
+</label>
+
+<label className="space-y-1 text-sm font-medium text-gray-700">
+  To
+
+  <DatePicker
+    value={endDate}
+    onChange={setEndDate}
+    min={startDate}
+    placeholder="Select end date"
+    className="w-full"
+  />
+</label>
 
           <div className="flex justify-end gap-2 sm:col-span-2">
             <button

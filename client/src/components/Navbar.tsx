@@ -1,7 +1,9 @@
+
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
+import DatePicker from "../components/DatePicker";
 import {
   Search,
   Bell,
@@ -19,6 +21,8 @@ import {
   LogOut,
   Mail,
   KeyRound,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
 import { logout, updateUser } from "../store/authSlice";
@@ -94,13 +98,15 @@ export default function Navbar({
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
 
-  // Separate password OTP popup.
   const [showPasswordOTPModal, setShowPasswordOTPModal] =
     useState(false);
 
-  // Temporary password OTP success toast.
   const [showPasswordOTPSuccessToast, setShowPasswordOTPSuccessToast] =
     useState(false);
+
+  // Password visibility states.
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
 
   // Create Task states.
   const [title, setTitle] = useState("");
@@ -227,7 +233,6 @@ export default function Navbar({
 
   const unreadCount = notificationsData?.unreadCount ?? 0;
 
-  // Automatically hide the password OTP success toast after 4 seconds.
   useEffect(() => {
     if (!showPasswordOTPSuccessToast) return;
 
@@ -369,6 +374,10 @@ export default function Navbar({
     setIsPasswordOTPSent(false);
     setPasswordError("");
     setPasswordSuccess("");
+
+    setShowCurrentPassword(false);
+    setShowNewPassword(false);
+
     setShowPasswordOTPModal(false);
     setShowPasswordOTPSuccessToast(false);
 
@@ -406,6 +415,9 @@ export default function Navbar({
     setIsPasswordOTPSent(false);
     setPasswordError("");
     setPasswordSuccess("");
+
+    setShowCurrentPassword(false);
+    setShowNewPassword(false);
   }
 
   async function handleProfileUpdate(
@@ -619,7 +631,6 @@ export default function Navbar({
     return true;
   }
 
-  // Request or resend password OTP.
   async function handleChangePassword(
     event?: FormEvent<HTMLFormElement>
   ) {
@@ -639,11 +650,7 @@ export default function Navbar({
 
       setPasswordOTP("");
       setIsPasswordOTPSent(true);
-
-      // Show temporary OTP confirmation toast.
       setShowPasswordOTPSuccessToast(true);
-
-      // Open the separate OTP verification popup.
       setShowPasswordOTPModal(true);
     } catch (error: unknown) {
       console.error("Request password OTP error:", error);
@@ -681,8 +688,8 @@ export default function Navbar({
       setIsPasswordOTPSent(false);
       setShowPasswordOTPModal(false);
       setShowPasswordOTPSuccessToast(false);
-
-      // Keep the success message visible in Account Settings.
+      setShowCurrentPassword(false);
+      setShowNewPassword(false);
     } catch (error: unknown) {
       console.error("Verify password OTP error:", error);
       setPasswordError(getErrorMessage(error));
@@ -1573,6 +1580,7 @@ export default function Navbar({
                   onSubmit={handleChangePassword}
                   className="space-y-4"
                 >
+                  {/* Current Password with Eye Icon */}
                   <div>
                     <label
                       htmlFor="current-password"
@@ -1580,22 +1588,46 @@ export default function Navbar({
                     >
                       Current password
                     </label>
-                    <input
-                      id="current-password"
-                      type="password"
-                      value={currentPassword}
-                      onChange={(event) => {
-                        setCurrentPassword(event.target.value);
-                        setPasswordError("");
-                        setPasswordSuccess("");
-                      }}
-                      placeholder="Enter current password"
-                      autoComplete="current-password"
-                      required
-                      className="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
-                    />
+
+                    <div className="relative">
+                      <input
+                        id="current-password"
+                        type={showCurrentPassword ? "text" : "password"}
+                        value={currentPassword}
+                        onChange={(event) => {
+                          setCurrentPassword(event.target.value);
+                          setPasswordError("");
+                          setPasswordSuccess("");
+                        }}
+                        placeholder="Enter current password"
+                        autoComplete="current-password"
+                        required
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 pr-11 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setShowCurrentPassword((visible) => !visible)
+                        }
+                        aria-label={
+                          showCurrentPassword
+                            ? "Hide current password"
+                            : "Show current password"
+                        }
+                        aria-pressed={showCurrentPassword}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        {showCurrentPassword ? (
+                          <EyeOff size={18} />
+                        ) : (
+                          <Eye size={18} />
+                        )}
+                      </button>
+                    </div>
                   </div>
 
+                  {/* New Password with Eye Icon */}
                   <div>
                     <label
                       htmlFor="new-password"
@@ -1603,21 +1635,45 @@ export default function Navbar({
                     >
                       New password
                     </label>
-                    <input
-                      id="new-password"
-                      type="password"
-                      value={newPassword}
-                      onChange={(event) => {
-                        setNewPassword(event.target.value);
-                        setPasswordError("");
-                        setPasswordSuccess("");
-                      }}
-                      placeholder="Enter new password"
-                      autoComplete="new-password"
-                      required
-                      minLength={8}
-                      className="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
-                    />
+
+                    <div className="relative">
+                      <input
+                        id="new-password"
+                        type={showNewPassword ? "text" : "password"}
+                        value={newPassword}
+                        onChange={(event) => {
+                          setNewPassword(event.target.value);
+                          setPasswordError("");
+                          setPasswordSuccess("");
+                        }}
+                        placeholder="Enter new password"
+                        autoComplete="new-password"
+                        required
+                        minLength={8}
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 pr-11 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setShowNewPassword((visible) => !visible)
+                        }
+                        aria-label={
+                          showNewPassword
+                            ? "Hide new password"
+                            : "Show new password"
+                        }
+                        aria-pressed={showNewPassword}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        {showNewPassword ? (
+                          <EyeOff size={18} />
+                        ) : (
+                          <Eye size={18} />
+                        )}
+                      </button>
+                    </div>
+
                     <p className="mt-2 text-xs leading-5 text-gray-500">
                       Use at least 8 characters, including an uppercase letter, a number, and a special character.
                     </p>
@@ -1662,9 +1718,7 @@ export default function Navbar({
               </section>
             </div>
 
-            <div className="border-t border-gray-200 bg-white px-6 py-4">
-              
-            </div>
+            <div className="border-t border-gray-200 bg-white px-6 py-4" />
           </div>
         </div>
       )}
@@ -1975,22 +2029,16 @@ export default function Navbar({
               </div>
 
               <div>
-                <label
-                  htmlFor="dueDate"
-                  className="mb-1 block text-sm font-medium text-gray-700"
-                >
-                  Due Date
-                </label>
-                <input
-                  id="dueDate"
-                  type="date"
-                  value={dueDate}
-                  onChange={(event) =>
-                    setDueDate(event.target.value)
-                  }
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900"
-                />
-              </div>
+  <label className="mb-1 block text-sm font-medium text-gray-700">
+    Due Date
+  </label>
+
+  <DatePicker
+    value={dueDate}
+    onChange={setDueDate}
+    placeholder="Select due date"
+  />
+</div>
 
               <div>
                 <label

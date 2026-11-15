@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSelector } from "react-redux";
 import type { RootState } from "../store/store";
+import DatePicker from "../components/DatePicker";
 
 import {
   X,
@@ -1637,23 +1638,24 @@ export default function TaskDetailsPanel({
               </div>
 
               {/* Due date */}
-              <div>
-                <label className={labelClass}>
-                  <CalendarDays size={15} />
-                  Due date
-                </label>
+            
+<div>
+  <label className={labelClass}>
+    <CalendarDays size={15} />
+    Due date
+  </label>
 
-                <input
-                  type="date"
-                  value={formattedDueDate}
-                  onChange={(event) =>
-                    void updateField({
-                      dueDate: event.target.value || null,
-                    })
-                  }
-                  className={`${inputClass} pr-4 [&::-webkit-calendar-picker-indicator]:ml-2 [&::-webkit-calendar-picker-indicator]:mr-1 [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
-                />
-              </div>
+  <DatePicker
+    value={formattedDueDate}
+    onChange={(date) =>
+      void updateField({
+        dueDate: date || null,
+      })
+    }
+    placeholder="Select due date"
+    className="w-full"
+  />
+</div>
             </div>
           </aside>
         </div>

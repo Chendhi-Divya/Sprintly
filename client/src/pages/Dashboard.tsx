@@ -11,6 +11,7 @@ export type TaskFilters = {
   priority: string;
   assignee: string;
   type: string;
+  dueDate: string;
 };
 
 const initialFilters: TaskFilters = {
@@ -18,6 +19,7 @@ const initialFilters: TaskFilters = {
   priority: "",
   assignee: "",
   type: "",
+  dueDate: "",
 };
 
 type DashboardProps = {

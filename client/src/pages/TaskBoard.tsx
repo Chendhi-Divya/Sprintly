@@ -7,13 +7,16 @@ import {
   useGetTasksQuery,
   useUpdateTaskMutation,
   useGetProjectSprintsQuery,
+  useGetProjectMembersQuery,
   type TaskStatus,
+  type TaskType,
 } from "../services/taskApi";
 
 import type { TaskFilters } from "./Dashboard";
 import TaskCard from "../components/TaskCard";
 import TaskDetailsPanel from "../components/TaskDetailsPanel";
 import SprintsView from "../components/SprintsView";
+import DatePicker from "../components/DatePicker";
 
 type ViewType = "List" | "Board" | "Sprints";
 
@@ -35,6 +38,58 @@ const columns: TaskStatus[] = [
   "Done",
 ];
 
+const taskTypes: TaskType[] = [
+  "Epic",
+  "Story",
+  "Task",
+  "Bug",
+];
+
+const dropdownClass =
+  "h-9 w-full min-w-[120px] appearance-none rounded-md border border-gray-200 bg-white px-3 pr-9 text-xs font-medium text-gray-700 shadow-sm outline-none transition-all hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400";
+
+function EditableDropdown({
+  value,
+  disabled,
+  onChange,
+  ariaLabel,
+  children,
+}: {
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+  ariaLabel: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="relative w-full min-w-[120px]">
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        aria-label={ariaLabel}
+        className={dropdownClass}
+      >
+        {children}
+      </select>
+
+      <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">
+        {disabled ? (
+          <LoaderCircle
+            size={14}
+            className="animate-spin text-gray-400"
+          />
+        ) : (
+          <ChevronDown
+            size={14}
+            className="text-gray-500"
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function TaskBoard({
   selectedProjectId,
   activeView,
@@ -47,13 +102,21 @@ export default function TaskBoard({
 }: TaskBoardProps) {
   const { data, isLoading, isError } = useGetTasksQuery();
 
-  // Fetch all project sprints, including completed sprints.
   const { data: sprintData } = useGetProjectSprintsQuery(
     selectedProjectId,
     {
       skip: !selectedProjectId,
     }
   );
+
+  const { data: projectMembersData } = useGetProjectMembersQuery(
+    selectedProjectId,
+    {
+      skip: !selectedProjectId,
+    }
+  );
+
+  const projectMembers = projectMembersData?.members ?? [];
 
   const [updateTask] = useUpdateTaskMutation();
   const prefetchTask = taskApi.usePrefetch("getTaskById");
@@ -72,7 +135,6 @@ export default function TaskBoard({
   const allTasks = data?.tasks ?? [];
   const projectSprints = sprintData?.sprints ?? [];
 
-  // Get tasks belonging to the selected project.
   const tasks = useMemo(() => {
     return allTasks.filter((task) => {
       const projectId =
@@ -84,8 +146,6 @@ export default function TaskBoard({
     });
   }, [allTasks, selectedProjectId]);
 
-  // Map every task to its sprint title.
-  // Completed sprint associations are retained for the List view.
   const sprintByTaskId = useMemo(() => {
     const sprintMap = new Map<string, string>();
 
@@ -98,21 +158,19 @@ export default function TaskBoard({
     return sprintMap;
   }, [projectSprints]);
 
-  // Find the current Active Sprint.
   const activeSprint = useMemo(() => {
     return projectSprints.find(
       (sprint) => sprint.status === "Active"
     );
   }, [projectSprints]);
 
-  // Get only the task IDs belonging to the Active Sprint.
   const activeSprintTaskIds = useMemo(() => {
     return new Set(
       activeSprint?.tasks.map((task) => task._id) ?? []
     );
   }, [activeSprint]);
 
-  // Apply search and filters for List and Board views.
+  // Filter tasks by search, status, priority, assignee, type and due date.
   const filteredTasks = useMemo(() => {
     return tasks.filter((task) => {
       const search = searchText.trim().toLowerCase();
@@ -141,40 +199,54 @@ export default function TaskBoard({
       const matchesType =
         !filters.type || task.type === filters.type;
 
+      const taskDueDate = task.dueDate
+        ? task.dueDate.slice(0, 10)
+        : "";
+
+      const matchesDueDate =
+        !filters.dueDate || taskDueDate === filters.dueDate;
+
       return (
         matchesSearch &&
         matchesStatus &&
         matchesPriority &&
         matchesAssignee &&
-        matchesType
+        matchesType &&
+        matchesDueDate
       );
     });
   }, [tasks, searchText, filters]);
 
-  // Board view: only tasks belonging to the Active Sprint.
   const activeSprintTasks = useMemo(() => {
     return filteredTasks.filter((task) =>
       activeSprintTaskIds.has(task._id)
     );
   }, [filteredTasks, activeSprintTaskIds]);
 
-  // Prefetch task details before the user clicks.
   function handleTaskHover(taskId: string) {
     prefetchTask(taskId, { ifOlderThan: 30 });
   }
 
-  // Update task status.
+  function setTaskUpdating(taskId: string, updating: boolean) {
+    setUpdatingTaskIds((current) => {
+      const next = new Set(current);
+
+      if (updating) {
+        next.add(taskId);
+      } else {
+        next.delete(taskId);
+      }
+
+      return next;
+    });
+  }
+
   async function handleStatusChange(
     taskId: string,
     status: TaskStatus
   ) {
     setMessage("");
-
-    setUpdatingTaskIds((current) => {
-      const next = new Set(current);
-      next.add(taskId);
-      return next;
-    });
+    setTaskUpdating(taskId, true);
 
     try {
       await updateTask({
@@ -184,16 +256,67 @@ export default function TaskBoard({
     } catch {
       setMessage("Failed to update task status.");
     } finally {
-      setUpdatingTaskIds((current) => {
-        const next = new Set(current);
-        next.delete(taskId);
-        return next;
-      });
+      setTaskUpdating(taskId, false);
     }
   }
 
-  // Find the selected task in the complete task list.
-  // This also works when a notification opens a task from another project.
+  async function handleTypeChange(
+    taskId: string,
+    type: TaskType
+  ) {
+    setMessage("");
+    setTaskUpdating(taskId, true);
+
+    try {
+      await updateTask({
+        id: taskId,
+        type,
+      }).unwrap();
+    } catch {
+      setMessage("Failed to update task type.");
+    } finally {
+      setTaskUpdating(taskId, false);
+    }
+  }
+
+  async function handleAssigneeChange(
+    taskId: string,
+    assignee: string
+  ) {
+    setMessage("");
+    setTaskUpdating(taskId, true);
+
+    try {
+      await updateTask({
+        id: taskId,
+        assignee: assignee || null,
+      }).unwrap();
+    } catch {
+      setMessage("Failed to update task assignee.");
+    } finally {
+      setTaskUpdating(taskId, false);
+    }
+  }
+
+  async function handleDueDateChange(
+    taskId: string,
+    dueDate: string
+  ) {
+    setMessage("");
+    setTaskUpdating(taskId, true);
+
+    try {
+      await updateTask({
+        id: taskId,
+        dueDate: dueDate || null,
+      }).unwrap();
+    } catch {
+      setMessage("Failed to update due date.");
+    } finally {
+      setTaskUpdating(taskId, false);
+    }
+  }
+
   const selectedTask = allTasks.find(
     (task) => task._id === selectedTaskId
   );
@@ -217,7 +340,6 @@ export default function TaskBoard({
 
   return (
     <div className="min-h-screen bg-white p-6 text-gray-900">
-      {/* Header */}
       {activeView !== "Sprints" && (
         <div className="mb-6">
           <h2 className="text-2xl font-bold">
@@ -230,14 +352,12 @@ export default function TaskBoard({
         </div>
       )}
 
-      {/* Error message */}
       {message && (
         <p className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
           {message}
         </p>
       )}
 
-      {/* Task count */}
       {activeView !== "Sprints" && (
         <p className="mb-4 text-sm text-gray-500">
           {activeView === "Board"
@@ -254,17 +374,17 @@ export default function TaskBoard({
           onTaskOpen={onTaskOpen}
         />
       ) : activeView === "List" ? (
-        <div className="overflow-x-auto rounded-xl border">
-          <table className="w-full min-w-[1050px] border-collapse text-left text-sm">
+        <div className="overflow-x-auto rounded-xl border border-gray-200">
+          <table className="w-full min-w-[1100px] border-collapse text-left text-sm">
             <thead className="bg-gray-50 text-xs uppercase text-gray-500">
               <tr>
                 <th className="w-28 px-4 py-3 font-semibold">Key</th>
                 <th className="px-4 py-3 font-semibold">Task</th>
                 <th className="px-4 py-3 font-semibold">Sprint</th>
-                <th className="px-4 py-3 font-semibold">Type</th>
-                <th className="px-4 py-3 font-semibold">Status</th>
+                <th className="w-36 px-4 py-3 font-semibold">Type</th>
+                <th className="w-40 px-4 py-3 font-semibold">Status</th>
                 <th className="px-4 py-3 font-semibold">Priority</th>
-                <th className="px-4 py-3 font-semibold">Assignee</th>
+                <th className="w-48 px-4 py-3 font-semibold">Assignee</th>
                 <th className="px-4 py-3 font-semibold">Reporter</th>
                 <th className="px-4 py-3 font-semibold">Due Date</th>
               </tr>
@@ -272,7 +392,12 @@ export default function TaskBoard({
 
             <tbody className="divide-y divide-gray-100">
               {filteredTasks.map((task) => {
-                const assignee =
+                const assigneeId =
+                  typeof task.assignee === "string"
+                    ? task.assignee
+                    : task.assignee?._id ?? "";
+
+                const assigneeName =
                   typeof task.assignee === "object" &&
                   task.assignee !== null
                     ? task.assignee.name
@@ -287,10 +412,12 @@ export default function TaskBoard({
                 const sprintName =
                   sprintByTaskId.get(task._id) ?? "Backlog";
 
+                const isUpdating = updatingTaskIds.has(task._id);
+
                 return (
                   <tr
                     key={task._id}
-                    className="transition hover:bg-gray-50"
+                    className="transition-colors hover:bg-gray-50"
                   >
                     <td className="px-4 py-4 font-mono text-xs font-medium text-blue-700">
                       {task.taskKey ?? "—"}
@@ -320,43 +447,49 @@ export default function TaskBoard({
                       </span>
                     </td>
 
-                    <td className="px-4 py-4">{task.type}</td>
-
+                    {/* Editable Type */}
                     <td className="px-4 py-4">
-                      <div className="relative w-fit">
-                        <select
-                          value={task.status}
-                          disabled={updatingTaskIds.has(task._id)}
-                          onChange={(event) =>
-                            handleStatusChange(
-                              task._id,
-                              event.target.value as TaskStatus
-                            )
-                          }
-                          className="min-w-[140px] appearance-none rounded-md border bg-white py-1.5 pl-3 pr-10 text-xs disabled:opacity-50"
-                          aria-label={`Status for ${task.title}`}
-                        >
-                          {columns.map((status) => (
-                            <option key={status} value={status}>
-                              {status}
-                            </option>
-                          ))}
-                        </select>
-
-                        {updatingTaskIds.has(task._id) ? (
-                          <LoaderCircle
-                            size={13}
-                            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-gray-500"
-                          />
-                        ) : (
-                          <ChevronDown
-                            size={13}
-                            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
-                          />
-                        )}
-                      </div>
+                      <EditableDropdown
+                        value={task.type}
+                        disabled={isUpdating}
+                        ariaLabel={`Type for ${task.title}`}
+                        onChange={(value) =>
+                          void handleTypeChange(
+                            task._id,
+                            value as TaskType
+                          )
+                        }
+                      >
+                        {taskTypes.map((type) => (
+                          <option key={type} value={type}>
+                            {type}
+                          </option>
+                        ))}
+                      </EditableDropdown>
                     </td>
 
+                    {/* Editable Status */}
+                    <td className="px-4 py-4">
+                      <EditableDropdown
+                        value={task.status}
+                        disabled={isUpdating}
+                        ariaLabel={`Status for ${task.title}`}
+                        onChange={(value) =>
+                          void handleStatusChange(
+                            task._id,
+                            value as TaskStatus
+                          )
+                        }
+                      >
+                        {columns.map((status) => (
+                          <option key={status} value={status}>
+                            {status}
+                          </option>
+                        ))}
+                      </EditableDropdown>
+                    </td>
+
+                    {/* Read-only Priority */}
                     <td className="px-4 py-4">
                       <span
                         className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
@@ -371,14 +504,52 @@ export default function TaskBoard({
                       </span>
                     </td>
 
-                    <td className="px-4 py-4">{assignee}</td>
+                    {/* Editable Assignee */}
+                    <td className="px-4 py-4">
+                      <EditableDropdown
+                        value={assigneeId}
+                        disabled={isUpdating}
+                        ariaLabel={`Assignee for ${task.title}`}
+                        onChange={(value) =>
+                          void handleAssigneeChange(task._id, value)
+                        }
+                      >
+                        <option value="">Unassigned</option>
+
+                        {projectMembers.map((member) => (
+                          <option key={member._id} value={member._id}>
+                            {member.name}
+                          </option>
+                        ))}
+
+                        {assigneeId &&
+                          !projectMembers.some(
+                            (member) => member._id === assigneeId
+                          ) && (
+                            <option value={assigneeId}>
+                              {assigneeName}
+                            </option>
+                          )}
+                      </EditableDropdown>
+                    </td>
 
                     <td className="px-4 py-4">{reporter}</td>
 
-                    <td className="whitespace-nowrap px-4 py-4 text-gray-600">
-                      {task.dueDate
-                        ? new Date(task.dueDate).toLocaleDateString()
-                        : "—"}
+                    {/* Editable Due Date */}
+                    <td className="whitespace-nowrap px-4 py-4">
+                      <DatePicker
+                        value={
+                          task.dueDate
+                            ? task.dueDate.slice(0, 10)
+                            : ""
+                        }
+                        onChange={(value) =>
+                          void handleDueDateChange(task._id, value)
+                        }
+                        disabled={isUpdating}
+                        placeholder="Select date"
+                        className="w-[150px]"
+                      />
                     </td>
                   </tr>
                 );
@@ -397,141 +568,136 @@ export default function TaskBoard({
             </tbody>
           </table>
         </div>
+      ) : !activeSprint ? (
+        <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-12 text-center">
+          <h3 className="font-semibold text-gray-800">
+            No Active Sprint
+          </h3>
+
+          <p className="mt-2 text-sm text-gray-500">
+            Start a planning sprint to display its tasks on the Board.
+          </p>
+        </div>
       ) : (
-        /* Board view: Active Sprint tasks only */
-        !activeSprint ? (
-          <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-12 text-center">
-            <h3 className="font-semibold text-gray-800">
-              No Active Sprint
-            </h3>
+        <>
+          <div className="mb-4 flex items-center gap-2">
+            <span className="rounded-md bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-700">
+              {activeSprint.title}
+            </span>
 
-            <p className="mt-2 text-sm text-gray-500">
-              Start a planning sprint to display its tasks on the Board.
-            </p>
+            <span className="text-xs text-gray-500">
+              Active Sprint
+            </span>
           </div>
-        ) : (
-          <>
-            <div className="mb-4 flex items-center gap-2">
-              <span className="rounded-md bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-700">
-                {activeSprint.title}
-              </span>
 
-              <span className="text-xs text-gray-500">
-                Active Sprint
-              </span>
-            </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {columns.map((status) => {
+              const columnTasks = activeSprintTasks.filter(
+                (task) => task.status === status
+              );
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {columns.map((status) => {
-                const columnTasks = activeSprintTasks.filter(
-                  (task) => task.status === status
-                );
-
-                return (
-                  <section
-                    key={status}
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = "move";
-                      setDragOverStatus(status);
-                    }}
-                    onDragLeave={(event) => {
-                      if (
-                        !event.currentTarget.contains(
-                          event.relatedTarget as Node | null
-                        )
-                      ) {
-                        setDragOverStatus(null);
-                      }
-                    }}
-                    onDrop={(event) => {
-                      event.preventDefault();
-
-                      const taskId =
-                        event.dataTransfer.getData("text/plain") ||
-                        draggedTaskId;
-
-                      // Only allow status changes for Active Sprint tasks.
-                      const task = activeSprintTasks.find(
-                        (item) => item._id === taskId
-                      );
-
+              return (
+                <section
+                  key={status}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                    setDragOverStatus(status);
+                  }}
+                  onDragLeave={(event) => {
+                    if (
+                      !event.currentTarget.contains(
+                        event.relatedTarget as Node | null
+                      )
+                    ) {
                       setDragOverStatus(null);
-                      setDraggedTaskId(null);
+                    }
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
 
-                      if (task && task.status !== status) {
-  void handleStatusChange(task._id, status);
-}
-                    }}
-                    className={`min-h-80 rounded-xl border p-3 transition-colors ${
-                      dragOverStatus === status
-                        ? "border-blue-400 bg-blue-50 ring-2 ring-blue-100"
-                        : "bg-gray-50"
-                    }`}
-                  >
-                    <div className="mb-4 flex justify-between">
-                      <h3 className="font-semibold">{status}</h3>
+                    const taskId =
+                      event.dataTransfer.getData("text/plain") ||
+                      draggedTaskId;
 
-                      <span className="rounded-full border bg-white px-2">
-                        {columnTasks.length}
-                      </span>
-                    </div>
+                    const task = activeSprintTasks.find(
+                      (item) => item._id === taskId
+                    );
 
-                    <div className="min-h-56 space-y-3">
-                      {columnTasks.map((task) => (
-                        <div
-                          key={task._id}
-                          draggable={!updatingTaskIds.has(task._id)}
-                          onMouseEnter={() => handleTaskHover(task._id)}
-                          onFocus={() => handleTaskHover(task._id)}
-                          onDragStart={(event) => {
-                            event.dataTransfer.effectAllowed = "move";
-                            event.dataTransfer.setData(
-                              "text/plain",
-                              task._id
-                            );
-                            setDraggedTaskId(task._id);
+                    setDragOverStatus(null);
+                    setDraggedTaskId(null);
+
+                    if (task && task.status !== status) {
+                      void handleStatusChange(task._id, status);
+                    }
+                  }}
+                  className={`min-h-80 rounded-xl border p-3 transition-colors ${
+                    dragOverStatus === status
+                      ? "border-blue-400 bg-blue-50 ring-2 ring-blue-100"
+                      : "bg-gray-50"
+                  }`}
+                >
+                  <div className="mb-4 flex justify-between">
+                    <h3 className="font-semibold">{status}</h3>
+
+                    <span className="rounded-full border bg-white px-2">
+                      {columnTasks.length}
+                    </span>
+                  </div>
+
+                  <div className="min-h-56 space-y-3">
+                    {columnTasks.map((task) => (
+                      <div
+                        key={task._id}
+                        draggable={!updatingTaskIds.has(task._id)}
+                        onMouseEnter={() => handleTaskHover(task._id)}
+                        onFocus={() => handleTaskHover(task._id)}
+                        onDragStart={(event) => {
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData(
+                            "text/plain",
+                            task._id
+                          );
+                          setDraggedTaskId(task._id);
+                        }}
+                        onDragEnd={() => {
+                          setDraggedTaskId(null);
+                          setDragOverStatus(null);
+                        }}
+                        className={`cursor-grab transition-opacity active:cursor-grabbing ${
+                          draggedTaskId === task._id ? "opacity-40" : ""
+                        }`}
+                        aria-label={`Drag ${task.title} to another status column`}
+                      >
+                        <TaskCard
+                          task={{
+                            ...task,
+                            assignee:
+                              typeof task.assignee === "object" &&
+                              task.assignee !== null
+                                ? task.assignee
+                                : undefined,
                           }}
-                          onDragEnd={() => {
-                            setDraggedTaskId(null);
-                            setDragOverStatus(null);
-                          }}
-                          className={`cursor-grab transition-opacity active:cursor-grabbing ${
-                            draggedTaskId === task._id ? "opacity-40" : ""
-                          }`}
-                          aria-label={`Drag ${task.title} to another status column`}
-                        >
-                          <TaskCard
-                            task={{
-                              ...task,
-                              assignee:
-                                typeof task.assignee === "object" &&
-                                task.assignee !== null
-                                  ? task.assignee
-                                  : undefined,
-                            }}
-                            isUpdating={updatingTaskIds.has(task._id)}
-                            onStatusChange={handleStatusChange}
-                            onClick={() => onTaskOpen(task._id)}
-                          />
-                        </div>
-                      ))}
+                          isUpdating={updatingTaskIds.has(task._id)}
+                          onStatusChange={handleStatusChange}
+                          onClick={() => onTaskOpen(task._id)}
+                        />
+                      </div>
+                    ))}
 
-                      {columnTasks.length === 0 && (
-                        <p className="rounded-lg border border-dashed bg-white p-4 text-center text-sm text-gray-500">
-                          No tasks in this column
-                        </p>
-                      )}
-                    </div>
-                  </section>
-                );
-              })}
-            </div>
-          </>
-        )
+                    {columnTasks.length === 0 && (
+                      <p className="rounded-lg border border-dashed bg-white p-4 text-center text-sm text-gray-500">
+                        No tasks in this column
+                      </p>
+                    )}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        </>
       )}
 
-      {/* Task details panel */}
       {selectedTaskId && (
         <TaskDetailsPanel
           taskId={selectedTaskId}
