@@ -22,21 +22,20 @@ export const googleAuthCallback = (
   try {
     const user = req.user as IUser | undefined;
 
+    const frontendUrl = process.env.FRONTEND_URL;
+
+    if (!frontendUrl) {
+      console.error("FRONTEND_URL is not configured.");
+      return res.status(500).send("Frontend URL is not configured.");
+    }
+
     if (!user) {
-      return res.redirect(
-        `${process.env.FRONTEND_URL}/login?google=failed`
-      );
+      return res.redirect(`${frontendUrl}/login?google=failed`);
     }
 
     const token = generateToken(user._id.toString());
 
-    // Set the same authentication cookie used by normal login.
     res.cookie("token", token, authCookieOptions);
-
-    // Send the token through the URL fragment.
-    // Fragments are not sent to the backend in HTTP requests.
-    const frontendUrl =
-      process.env.FRONTEND_URL || "http://localhost:5173";
 
     return res.redirect(
       `${frontendUrl}/login#token=${encodeURIComponent(token)}`
@@ -44,8 +43,12 @@ export const googleAuthCallback = (
   } catch (error) {
     console.error("Google callback error:", error);
 
-    return res.redirect(
-      `${process.env.FRONTEND_URL}/login?google=failed`
-    );
+    const frontendUrl = process.env.FRONTEND_URL;
+
+    if (!frontendUrl) {
+      return res.status(500).send("Google authentication failed.");
+    }
+
+    return res.redirect(`${frontendUrl}/login?google=failed`);
   }
 };
