@@ -93,19 +93,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
 
   return fallback;
 }
-function formatDate(value?: string) {
-  if (!value) return "Date not set";
 
-  const date = new Date(value);
-
-  return Number.isNaN(date.getTime())
-    ? "Date not set"
-    : date.toLocaleDateString(undefined, {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      });
-}
 
 function getDateInputValue(value?: string) {
   if (!value) return "";
