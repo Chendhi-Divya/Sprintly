@@ -9,7 +9,6 @@ import {
   X,
   ListChecks,
   MoreVertical,
-  CheckCircle,
 } from "lucide-react";
 import DatePicker from "../components/DatePicker";
 
