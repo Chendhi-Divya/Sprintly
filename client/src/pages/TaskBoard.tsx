@@ -360,9 +360,7 @@ export default function TaskBoard({
 
       {activeView !== "Sprints" && (
         <p className="mb-4 text-sm text-gray-500">
-          {activeView === "Board"
-            ? `Showing ${activeSprintTasks.length} Active Sprint tasks`
-            : `Showing ${filteredTasks.length} of ${tasks.length} tasks`}
+
         </p>
       )}
 

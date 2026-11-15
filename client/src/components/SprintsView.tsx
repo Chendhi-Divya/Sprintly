@@ -1,4 +1,3 @@
-
 import { useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
@@ -9,6 +8,8 @@ import {
   UserRound,
   X,
   ListChecks,
+  MoreVertical,
+  CheckCircle,
 } from "lucide-react";
 import DatePicker from "../components/DatePicker";
 
@@ -71,6 +72,7 @@ type SprintEditValues = {
 const BACKLOG_ID = "__backlog__";
 const UNASSIGNED_VALUE = "__unassigned__";
 const CLEAR_DATE_VALUE = "__clear_date__";
+const CREATE_NEW_SPRINT_VALUE = "__create_new_sprint__";
 
 const statusStyles: Record<SprintStatus, string> = {
   Planning: "bg-amber-50 text-amber-700",
@@ -128,7 +130,6 @@ function getDateInputValue(value?: string) {
   ].join("-");
 }
 
-// Display dates in DD-MM-YYYY format.
 function formatDateDisplay(value?: string) {
   const dateValue = getDateInputValue(value);
 
@@ -178,10 +179,49 @@ function isTaskOverdue(task: Task) {
   return dueDate < today;
 }
 
-function TaskColumnHeader() {
+function TaskColumnHeader({
+  tasks,
+  selectedTaskIds,
+  onSelectAll,
+}: {
+  tasks: Task[];
+  selectedTaskIds: string[];
+  onSelectAll: (checked: boolean) => void;
+}) {
+  const checkboxRef = useRef<HTMLInputElement>(null);
+
+  const selectedCount = tasks.filter((task) =>
+    selectedTaskIds.includes(task._id)
+  ).length;
+
+  const allSelected =
+    tasks.length > 0 && selectedCount === tasks.length;
+
+  const partiallySelected =
+    selectedCount > 0 && selectedCount < tasks.length;
+
+  useEffect(() => {
+    if (checkboxRef.current) {
+      checkboxRef.current.indeterminate = partiallySelected;
+    }
+  }, [partiallySelected]);
+
   return (
     <div className="grid min-w-[1000px] grid-cols-[minmax(270px,1fr)_145px_110px_165px_145px] items-center gap-4 border-b border-gray-100 bg-gray-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-      <span>Task</span>
+      <div className="flex items-center gap-3">
+        <input
+          ref={checkboxRef}
+          type="checkbox"
+          checked={allSelected}
+          disabled={tasks.length === 0}
+          onChange={(event) => onSelectAll(event.target.checked)}
+          aria-label="Select or unselect all tasks"
+          className="h-4 w-4 shrink-0 cursor-pointer rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed"
+        />
+
+        <span>Task</span>
+      </div>
+
       <span>Status</span>
       <span>Priority</span>
       <span>Assignee</span>
@@ -622,6 +662,9 @@ export default function SprintsView({
   const [inlineEditingSprintId, setInlineEditingSprintId] =
     useState<string | null>(null);
 
+  const [openSprintMenuId, setOpenSprintMenuId] =
+    useState<string | null>(null);
+
   const [name, setName] = useState("");
   const [goal, setGoal] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -630,6 +673,9 @@ export default function SprintsView({
   const [errorMessage, setErrorMessage] = useState("");
 
   const [sprintToComplete, setSprintToComplete] =
+    useState<ProjectSprint | null>(null);
+
+  const [pendingCompleteSprint, setPendingCompleteSprint] =
     useState<ProjectSprint | null>(null);
 
   const [sprintToDelete, setSprintToDelete] =
@@ -773,6 +819,28 @@ export default function SprintsView({
     });
   }
 
+  function handleSelectAllTasks(
+  tasks: Task[],
+  sourceId: string,
+  checked: boolean
+) {
+  if (checked) {
+    const taskIds = tasks.map((task) => task._id);
+
+    setSelectedTaskIds(taskIds);
+    setSelectionSourceId(sourceId);
+    setBulkError("");
+    setBulkValues({ ...emptyBulkValues });
+    setShowBulkEdit(false);
+
+    return;
+  }
+
+  if (selectionSourceId === sourceId) {
+    clearSelection();
+  }
+}
+
   function resetDragState() {
     setDraggedTaskId("");
     draggedTaskIdsRef.current = [];
@@ -783,6 +851,7 @@ export default function SprintsView({
   useEffect(() => {
     clearSelection();
     resetDragState();
+    setOpenSprintMenuId(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, searchText, selectedAssigneeId]);
 
@@ -844,13 +913,19 @@ export default function SprintsView({
     }
   }
 
+  // ==========================================
+  // CREATE SPRINT
+  // ==========================================
+
   async function handleCreateSprint(
     event: React.FormEvent<HTMLFormElement>
   ) {
     event.preventDefault();
     setErrorMessage("");
 
-    if (!name.trim()) {
+    const trimmedTitle = name.trim();
+
+    if (!trimmedTitle) {
       setErrorMessage("Sprint title is required.");
       return;
     }
@@ -860,24 +935,73 @@ export default function SprintsView({
       endDate &&
       new Date(endDate).getTime() < new Date(startDate).getTime()
     ) {
-      setErrorMessage("End date must be after or equal to the start date.");
+      setErrorMessage(
+        "End date must be after or equal to the start date."
+      );
       return;
     }
 
     try {
       await createSprint({
         projectId,
-        title: name.trim(),
+        title: trimmedTitle,
         description: goal.trim(),
         ...(startDate ? { startDate } : {}),
         ...(endDate ? { endDate } : {}),
       }).unwrap();
 
+      const sprintBeingCompleted = pendingCompleteSprint;
+
       resetForm();
-      await refetchSprints();
+
+      const refreshed = await refetchSprints();
+
+      if (sprintBeingCompleted) {
+        const createdSprints = (
+          refreshed.data?.sprints ?? []
+        )
+          .filter(
+            (sprint) =>
+              sprint._id !== sprintBeingCompleted._id &&
+              sprint.title === trimmedTitle &&
+              sprint.status === "Planning"
+          )
+          .sort(
+            (a, b) =>
+              new Date(b.createdAt).getTime() -
+              new Date(a.createdAt).getTime()
+          );
+
+        const newSprint = createdSprints[0];
+
+        if (!newSprint) {
+          setPendingCompleteSprint(null);
+          setErrorMessage(
+            "Sprint created, but the new sprint could not be found. Please complete the previous sprint manually."
+          );
+          return;
+        }
+
+        await completeSprint({
+          projectId,
+          sprintId: sprintBeingCompleted._id,
+          moveIncompleteToSprintId: newSprint._id,
+        }).unwrap();
+
+        setPendingCompleteSprint(null);
+        setSprintToComplete(null);
+        setMoveDestinationId("");
+
+        await refetchSprints();
+      }
     } catch (error: unknown) {
+      setPendingCompleteSprint(null);
+
       setErrorMessage(
-        getErrorMessage(error, "Could not create sprint.")
+        getErrorMessage(
+          error,
+          "Could not create the sprint or complete the previous sprint."
+        )
       );
     }
   }
@@ -902,72 +1026,76 @@ export default function SprintsView({
     setBulkError("");
   }
 
-  async function handleBulkUpdate() {
-    setBulkError("");
+ async function handleBulkUpdate() {
+  setBulkError("");
 
-    if (selectedTaskIds.length === 0 || !selectionSourceId) {
-      setBulkError("Select at least one task.");
-      return;
-    }
+  if (selectedTaskIds.length === 0 || !selectionSourceId) {
+    setBulkError("Select at least one task.");
+    return;
+  }
 
-    const orderedTaskIds = getOrderedSelectedIds(
-      selectedTaskIds,
-      selectionSourceId
-    );
+  const orderedTaskIds = getOrderedSelectedIds(
+    selectedTaskIds,
+    selectionSourceId
+  );
 
-    if (orderedTaskIds.length === 0) {
-      setBulkError("No selected tasks were found.");
-      return;
-    }
+  if (orderedTaskIds.length === 0) {
+    setBulkError("No selected tasks were found.");
+    return;
+  }
 
-    const fieldsToUpdate = (
-      Object.keys(bulkValues) as BulkTaskField[]
-    ).filter((field) => bulkValues[field] !== "");
+  const fieldsToUpdate = (
+    Object.keys(bulkValues) as BulkTaskField[]
+  ).filter((field) => bulkValues[field] !== "");
 
-    if (fieldsToUpdate.length === 0) {
-      setBulkError("Choose at least one field to update.");
-      return;
-    }
+  if (fieldsToUpdate.length === 0) {
+    setBulkError("Choose at least one field to update.");
+    return;
+  }
 
-    try {
-      for (const field of fieldsToUpdate) {
-        let valueToSend: string | null = bulkValues[field];
+  try {
+    for (const field of fieldsToUpdate) {
+      let valueToSend: string | null = bulkValues[field];
 
-        if (
-          field === "assignee" &&
-          bulkValues[field] === UNASSIGNED_VALUE
-        ) {
-          valueToSend = null;
-        }
-
-        if (
-          field === "dueDate" &&
-          bulkValues[field] === CLEAR_DATE_VALUE
-        ) {
-          valueToSend = null;
-        }
-
-        await bulkUpdateTasks({
-          taskIds: orderedTaskIds,
-          field,
-          value: valueToSend,
-        }).unwrap();
+      if (
+        field === "assignee" &&
+        bulkValues[field] === UNASSIGNED_VALUE
+      ) {
+        valueToSend = null;
       }
 
-      setBulkValues({ ...emptyBulkValues });
-      setBulkError("");
-      await refetchSprints();
-    } catch (error: unknown) {
-      setBulkError(
-        getErrorMessage(
-          error,
-          "Could not update all selected tasks. Please check the changes and try again."
-        )
-      );
+      if (
+        field === "dueDate" &&
+        bulkValues[field] === CLEAR_DATE_VALUE
+      ) {
+        valueToSend = null;
+      }
 
-      await refetchSprints();
+      await bulkUpdateTasks({
+        taskIds: orderedTaskIds,
+        field,
+        value: valueToSend,
+      }).unwrap();
     }
+
+          setBulkValues({ ...emptyBulkValues });
+      setBulkError("");
+      setShowBulkEdit(false);
+      await refetchSprints();
+
+    // Close the Edit Fields panel after successful update
+    setShowBulkEdit(false);
+  } catch (error: unknown) {
+    setBulkError(
+      getErrorMessage(
+        error,
+        "Could not update all selected tasks. Please check the changes and try again."
+      )
+    );
+
+    await refetchSprints();
   }
+}
 
   // ==========================================
   // GROUP DRAG AND DROP
@@ -1402,6 +1530,7 @@ export default function SprintsView({
             onClick={() => {
               if (showForm) {
                 resetForm();
+                setPendingCompleteSprint(null);
               } else {
                 setName("");
                 setGoal("");
@@ -1442,7 +1571,10 @@ export default function SprintsView({
 
             <button
               type="button"
-              onClick={resetForm}
+              onClick={() => {
+                resetForm();
+                setPendingCompleteSprint(null);
+              }}
               className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
               aria-label="Close sprint form"
             >
@@ -1504,7 +1636,10 @@ export default function SprintsView({
           <div className="flex justify-end gap-2 sm:col-span-2">
             <button
               type="button"
-              onClick={resetForm}
+              onClick={() => {
+                resetForm();
+                setPendingCompleteSprint(null);
+              }}
               disabled={isCreating}
               className="rounded-lg border px-4 py-2 text-sm text-gray-600 hover:bg-gray-50"
             >
@@ -1584,6 +1719,8 @@ export default function SprintsView({
                       </div>
                     </div>
 
+                    {/* SPRINT ACTIONS */}
+
                     <div className="flex shrink-0 items-center gap-2">
                       {sprint.status === "Planning" && (
                         <button
@@ -1607,52 +1744,89 @@ export default function SprintsView({
                         </button>
                       )}
 
-                      {sprint.status === "Active" && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setMoveDestinationId("");
-                            setSprintToComplete(sprint);
-                          }}
-                          disabled={isBusy}
-                          className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          Complete sprint
-                        </button>
-                      )}
+                      {/* THREE-DOT MENU */}
 
-                      {(sprint.status === "Active" ||
-                        sprint.status === "Planning") && (
+                      <div className="relative">
                         <button
                           type="button"
-                          onClick={() => {
-                            setErrorMessage("");
-                            setInlineEditingSprintId(sprint._id);
-                          }}
+                          onClick={() =>
+                            setOpenSprintMenuId((previous) =>
+                              previous === sprint._id
+                                ? null
+                                : sprint._id
+                            )
+                          }
                           disabled={isBusy || isUpdating}
-                          title="Edit sprint"
-                          aria-label={`Edit ${sprint.title}`}
-                          className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          title="Sprint actions"
+                          aria-label={`Sprint actions for ${sprint.title}`}
+                          aria-expanded={openSprintMenuId === sprint._id}
+                          className="rounded-lg border border-gray-200 bg-white p-2 text-gray-600 transition hover:border-gray-300 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          <Pencil size={14} />
+                          <MoreVertical size={18} />
                         </button>
-                      )}
 
-                      {sprint.status !== "Active" && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setMoveDestinationId("");
-                            setSprintToDelete(sprint);
-                          }}
-                          disabled={isBusy}
-                          title="Delete sprint"
-                          className="rounded-lg border border-gray-200 bg-white p-2 text-gray-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
-                          aria-label={`Delete ${sprint.title}`}
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      )}
+                        {openSprintMenuId === sprint._id && (
+                          <>
+                            <button
+                              type="button"
+                              aria-label="Close sprint menu"
+                              onClick={() => setOpenSprintMenuId(null)}
+                              className="fixed inset-0 z-30 cursor-default"
+                            />
+
+                            <div className="absolute right-0 top-full z-40 mt-2 w-48 rounded-lg border border-gray-200 bg-white p-1.5 shadow-lg">
+                              {sprint.status === "Active" && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenSprintMenuId(null);
+                                    setMoveDestinationId("");
+                                    setSprintToComplete(sprint);
+                                  }}
+                                  disabled={isBusy}
+                                  className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm text-gray-700 transition hover:bg-gray-50 disabled:opacity-50"
+                                >
+                                  
+                                  Complete sprint
+                                </button>
+                              )}
+
+                              {(sprint.status === "Active" ||
+                                sprint.status === "Planning") && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenSprintMenuId(null);
+                                    setErrorMessage("");
+                                    setInlineEditingSprintId(sprint._id);
+                                  }}
+                                  disabled={isBusy || isUpdating}
+                                  className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm text-gray-700 transition hover:bg-blue-50 hover:text-blue-700 disabled:opacity-50"
+                                >
+                                  
+                                  Edit sprint
+                                </button>
+                              )}
+
+                              {sprint.status !== "Active" && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenSprintMenuId(null);
+                                    setMoveDestinationId("");
+                                    setSprintToDelete(sprint);
+                                  }}
+                                  disabled={isBusy}
+                                  className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+                                >
+                                  <Trash2 size={15} />
+                                  Delete sprint
+                                </button>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </header>
                 )}
@@ -1660,7 +1834,13 @@ export default function SprintsView({
                 {/* TASK LIST */}
 
                 <div className="w-full overflow-x-auto">
-                  <TaskColumnHeader />
+                  <TaskColumnHeader
+  tasks={visibleTasks}
+  selectedTaskIds={selectedTaskIds}
+  onSelectAll={(checked) =>
+    handleSelectAllTasks(visibleTasks, sprint._id, checked)
+  }
+/>
 
                   <div
                     onDragOver={(event) =>
@@ -1746,7 +1926,13 @@ export default function SprintsView({
         </header>
 
         <div className="w-full overflow-x-auto">
-          <TaskColumnHeader />
+          <TaskColumnHeader
+  tasks={backlogTasks}
+  selectedTaskIds={selectedTaskIds}
+  onSelectAll={(checked) =>
+    handleSelectAllTasks(backlogTasks, BACKLOG_ID, checked)
+  }
+/>
 
           <div
             onDragOver={(event) => handleContainerDragOver(event, null)}
@@ -1842,15 +2028,7 @@ export default function SprintsView({
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setShowBulkEdit(false)}
-                disabled={isBusyWithBulk}
-                className="rounded-lg p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
-                aria-label="Close bulk edit panel"
-              >
-                <X size={20} />
-              </button>
+             
             </header>
 
             <div className="flex-1 space-y-5 overflow-y-auto p-6">
@@ -1914,6 +2092,7 @@ export default function SprintsView({
             ) {
               setSprintToComplete(null);
               setSprintToDelete(null);
+              setMoveDestinationId("");
             }
           }}
         >
@@ -1946,9 +2125,26 @@ export default function SprintsView({
                     <div className="relative">
                       <select
                         value={moveDestinationId}
-                        onChange={(event) =>
-                          setMoveDestinationId(event.target.value)
-                        }
+                        onChange={(event) => {
+                          const value = event.target.value;
+
+                          if (value === CREATE_NEW_SPRINT_VALUE) {
+                            setPendingCompleteSprint(sprintToComplete);
+                            setSprintToComplete(null);
+                            setMoveDestinationId("");
+
+                            setName("");
+                            setGoal("");
+                            setStartDate("");
+                            setEndDate("");
+                            setErrorMessage("");
+                            setShowForm(true);
+
+                            return;
+                          }
+
+                          setMoveDestinationId(value);
+                        }}
                         className="w-full appearance-none rounded-lg border border-gray-300 bg-white py-2.5 pl-3 pr-10 text-sm outline-none focus:border-blue-500"
                       >
                         <option value="" disabled>
@@ -1965,9 +2161,13 @@ export default function SprintsView({
                           )
                           .map((item) => (
                             <option key={item._id} value={item._id}>
-                              {item.title} (next sprint)
+                              {item.title} (Planning)
                             </option>
                           ))}
+
+                        <option value={CREATE_NEW_SPRINT_VALUE}>
+                          + Create a new sprint
+                        </option>
                       </select>
 
                       <ChevronDown
@@ -1998,7 +2198,10 @@ export default function SprintsView({
                 <div className="mt-6 flex justify-end gap-2">
                   <button
                     type="button"
-                    onClick={() => setSprintToComplete(null)}
+                    onClick={() => {
+                      setSprintToComplete(null);
+                      setMoveDestinationId("");
+                    }}
                     disabled={isCompleting}
                     className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
                   >
@@ -2071,7 +2274,10 @@ export default function SprintsView({
                 <div className="mt-6 flex justify-end gap-2">
                   <button
                     type="button"
-                    onClick={() => setSprintToDelete(null)}
+                    onClick={() => {
+                      setSprintToDelete(null);
+                      setMoveDestinationId("");
+                    }}
                     disabled={isDeleting}
                     className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
                   >
