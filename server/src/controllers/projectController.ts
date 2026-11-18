@@ -12,11 +12,14 @@ import TaskCounter from "../models/taskCounter.js";
    HELPER FUNCTIONS
 -------------------------------------------------- */
 
+// Normalize Express route parameters.
+function routeParam(value: string | string[] | undefined): string {
+  return typeof value === "string" ? value : "";
+}
+
 // Generate a project key from its name.
-// Example: Sprintly Demo -> SD
 function makeProjectKey(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);
-
   const initials = words.map((word) => word[0]).join("");
 
   const candidate = (words.length > 1 ? initials : words[0] ?? "PRJ")
@@ -28,7 +31,6 @@ function makeProjectKey(name: string): string {
 }
 
 // Generate a unique project key.
-// Example: SD, SD2, SD3
 async function getUniqueProjectKey(
   name: string,
   organization: string,
@@ -78,44 +80,72 @@ async function getProjectOrganization(project: {
 function getOrganizationRole(
   organization: any,
   userId: string
-): string {
-  const membership = organization.memberships?.find(
-    (item: any) => item.user?.toString() === userId
-  );
-
-  if (membership?.role) {
-    return membership.role;
-  }
-
+): string | undefined {
   if (organization.admin?.toString() === userId) {
     return "Owner";
   }
 
-  return "Member";
+  const membership = organization.memberships?.find((item: any) => {
+    const membershipUserId =
+      item.user?._id?.toString() ??
+      item.user?.toString();
+
+    return membershipUserId === userId;
+  });
+
+  return membership?.role;
 }
 
-// Automatically include the project creator and organization Owner
-// in the project members array.
-//
-// This also updates existing projects when they are accessed.
+// Get organization Owners, Admins, and Members.
+// Viewers are excluded.
+function getEligibleOrganizationMemberIds(
+  organization: any
+): string[] {
+  const eligibleMembers: string[] = [];
+
+  for (const membership of organization.memberships ?? []) {
+    if (
+      ["Owner", "Admin", "Member"].includes(membership.role)
+    ) {
+      const user = membership.user;
+
+      const memberId =
+        user?._id?.toString() ??
+        user?.toString();
+
+      if (memberId) {
+        eligibleMembers.push(memberId);
+      }
+    }
+  }
+
+  if (organization.admin) {
+    eligibleMembers.push(organization.admin.toString());
+  }
+
+  return Array.from(new Set(eligibleMembers));
+}
+
+// Automatically include organization Owners, Admins, and Members
+// in every project. Do not automatically include Viewers.
 async function ensureDefaultProjectMembers(
   project: any,
   organization: any
 ): Promise<void> {
-  const defaultMemberIds = [
-    project.owner?.toString(),
-    organization.admin?.toString(),
-  ].filter((id): id is string => Boolean(id));
+  const eligibleMembers =
+    getEligibleOrganizationMemberIds(organization);
 
-  const existingMemberIds = new Set(
-    project.members.map((member: mongoose.Types.ObjectId) =>
-      member.toString()
+  const existingMemberIds = new Set<string>(
+    (project.members ?? []).map((member: any) =>
+      member?._id
+        ? member._id.toString()
+        : member.toString()
     )
   );
 
   let changed = false;
 
-  for (const memberId of defaultMemberIds) {
+  for (const memberId of eligibleMembers) {
     if (!existingMemberIds.has(memberId)) {
       project.members.push(
         new mongoose.Types.ObjectId(memberId)
@@ -131,21 +161,15 @@ async function ensureDefaultProjectMembers(
   }
 }
 
-// Check whether a user can manage a project.
-// The project owner and organization Owner/Admin can manage it.
+// Only organization Owners and Admins can manage projects.
 async function canManageProject(
   project: {
-    owner: mongoose.Types.ObjectId;
     organization: string;
   },
   userId: string
 ): Promise<boolean> {
   if (!userId) {
     return false;
-  }
-
-  if (project.owner.toString() === userId) {
-    return true;
   }
 
   const organization = await getProjectOrganization(project);
@@ -157,6 +181,49 @@ async function canManageProject(
   const role = getOrganizationRole(organization, userId);
 
   return role === "Owner" || role === "Admin";
+}
+
+// Check whether a user can access a project.
+async function canAccessProject(
+  project: any,
+  userId: string
+): Promise<boolean> {
+  if (!userId) {
+    return false;
+  }
+
+  const organization = await getProjectOrganization(project);
+
+  if (!organization) {
+    return false;
+  }
+
+  const role = getOrganizationRole(organization, userId);
+
+  // Viewers cannot access projects.
+  if (role === "Viewer") {
+    return false;
+  }
+
+  // Organization Owners and Admins can access every project.
+  if (role === "Owner" || role === "Admin") {
+    return true;
+  }
+
+  // Organization Members automatically belong to every project.
+  if (role === "Member") {
+    await ensureDefaultProjectMembers(project, organization);
+    return true;
+  }
+
+  // Project-only invitees can access only projects they belong to.
+  return (project.members ?? []).some((member: any) => {
+    const memberId = member?._id
+      ? member._id.toString()
+      : member.toString();
+
+    return memberId === userId;
+  });
 }
 
 // Change all task keys when a project's issue key changes.
@@ -172,7 +239,6 @@ async function updateProjectTaskKeys(
   });
 
   // First assign temporary unique keys.
-  // This avoids conflicts with the unique taskKey index.
   for (const task of tasks) {
     task.taskKey = `TMP-${task._id.toString()}`;
     await task.save();
@@ -184,7 +250,7 @@ async function updateProjectTaskKeys(
     await task.save();
   }
 
-  // Keep the counter synchronized with the number of tasks.
+  // Keep the counter synchronized.
   await TaskCounter.updateOne(
     { _id: projectId.toString() },
     {
@@ -256,14 +322,12 @@ export const createProject = async (
     ];
 
     const selectedOrganization = await Organization.findOne({
-      members: userId,
       $or: organizationMatch,
     });
 
     if (!selectedOrganization) {
-      return res.status(403).json({
-        message:
-          "You must belong to the selected organization to create a project",
+      return res.status(404).json({
+        message: "Organization not found",
       });
     }
 
@@ -272,16 +336,19 @@ export const createProject = async (
       userId
     );
 
-    if (organizationRole === "Viewer") {
+    if (
+      organizationRole !== "Owner" &&
+      organizationRole !== "Admin"
+    ) {
       return res.status(403).json({
-        message: "Viewers cannot create projects",
+        message: "Only organization Owners and Admins can create projects",
       });
     }
 
     const existingProject = await Project.exists({
-  key: projectKey,
-  organization: selectedOrganization.org_id,
-});
+      key: projectKey,
+      organization: selectedOrganization.org_id,
+    });
 
     if (existingProject) {
       return res.status(409).json({
@@ -289,19 +356,9 @@ export const createProject = async (
       });
     }
 
-    // Automatically add:
-    // 1. The project creator.
-    // 2. The organization Owner.
-    //
-    // Set removes duplicate IDs if both users are the same.
-    const defaultMembers = [
-      userId.toString(),
-      selectedOrganization.admin.toString(),
-    ];
-
-    const projectMembers = [
-      ...new Set(defaultMembers),
-    ].map((memberId) => new mongoose.Types.ObjectId(memberId));
+    const projectMembers = getEligibleOrganizationMemberIds(
+      selectedOrganization
+    ).map((memberId) => new mongoose.Types.ObjectId(memberId));
 
     const project = await Project.create({
       name: name.trim(),
@@ -365,13 +422,13 @@ export const getProjects = async (
 
     const organizationMatch = [
       { org_id: organizationId },
+      { org_name: organizationId },
       ...(mongoose.isValidObjectId(organizationId)
         ? [{ _id: organizationId }]
         : []),
     ];
 
     const organization = await Organization.findOne({
-      members: userId,
       $or: organizationMatch,
     }).select("org_id org_name admin members memberships");
 
@@ -386,9 +443,19 @@ export const getProjects = async (
       userId
     );
 
+    if (membershipRole === "Viewer") {
+      return res.status(200).json({
+        message: "Projects fetched successfully",
+        projects: [],
+      });
+    }
+
     const isOrganizationAdmin =
       membershipRole === "Owner" ||
       membershipRole === "Admin";
+
+    const isOrganizationMember =
+      membershipRole === "Member";
 
     const projectOrganizationValues = [
       organization.org_id,
@@ -396,14 +463,15 @@ export const getProjects = async (
       organization.org_name,
     ];
 
-    const projectFilter = {
+    const projectFilter: any = {
       organization: {
         $in: projectOrganizationValues,
       },
-      ...(!isOrganizationAdmin && {
-        members: userId,
-      }),
     };
+
+    if (!isOrganizationAdmin && !isOrganizationMember) {
+      projectFilter.members = userId;
+    }
 
     const projects = await Project.find(projectFilter)
       .sort({ createdAt: -1 });
@@ -427,14 +495,14 @@ export const getProjects = async (
 
     const projectsWithOrganizationNames = await Promise.all(
       projects.map(async (project) => {
-        // Add creator and organization Owner to existing projects too.
         await ensureDefaultProjectMembers(project, organization);
 
         if (!project.key) {
           project.key = await getUniqueProjectKey(
-  project.name,
-  project.organization
-);
+            project.name,
+            project.organization
+          );
+
           await project.save();
         }
 
@@ -487,7 +555,7 @@ export const getProjectById = async (
   res: Response
 ) => {
   try {
-    const { id } = req.params;
+    const id = routeParam(req.params.id);
     const userId = (req as any).userId;
 
     if (!userId) {
@@ -510,25 +578,12 @@ export const getProjectById = async (
       });
     }
 
-    const isProjectMember = project.members.some(
-      (member) => member.toString() === userId
-    );
+    const hasAccess = await canAccessProject(project, userId);
 
-    const canManage = await canManageProject(
-      project,
-      userId
-    );
-
-    if (!isProjectMember && !canManage) {
+    if (!hasAccess) {
       return res.status(403).json({
         message: "You do not have access to this project",
       });
-    }
-
-    const organization = await getProjectOrganization(project);
-
-    if (organization) {
-      await ensureDefaultProjectMembers(project, organization);
     }
 
     const populatedProject = await project.populate([
@@ -565,7 +620,7 @@ export const updateProject = async (
   res: Response
 ) => {
   try {
-    const { id } = req.params;
+    const id = routeParam(req.params.id);
 
     const {
       name,
@@ -596,15 +651,12 @@ export const updateProject = async (
       });
     }
 
-    const canManage = await canManageProject(
-      project,
-      userId
-    );
+    const canManage = await canManageProject(project, userId);
 
     if (!canManage) {
       return res.status(403).json({
         message:
-          "Only the project owner or organization admin can update this project",
+          "Only organization Owners and Admins can update this project",
       });
     }
 
@@ -616,15 +668,10 @@ export const updateProject = async (
       });
     }
 
-    // Ensure creator and organization Owner are project members.
     await ensureDefaultProjectMembers(project, organization);
 
-    // UPDATE PROJECT NAME
     if (name !== undefined) {
-      if (
-        typeof name !== "string" ||
-        !name.trim()
-      ) {
+      if (typeof name !== "string" || !name.trim()) {
         return res.status(400).json({
           message: "Project name cannot be empty",
         });
@@ -633,7 +680,6 @@ export const updateProject = async (
       project.name = name.trim();
     }
 
-    // UPDATE PROJECT DESCRIPTION
     if (description !== undefined) {
       if (typeof description !== "string") {
         return res.status(400).json({
@@ -644,7 +690,6 @@ export const updateProject = async (
       project.description = description.trim();
     }
 
-    // UPDATE PROJECT ISSUE KEY
     let keyChanged = false;
 
     if (requestedKey !== undefined) {
@@ -666,11 +711,11 @@ export const updateProject = async (
         });
       }
 
-     const existingProject = await Project.exists({
-  key: projectKey,
-  organization: project.organization,
-  _id: { $ne: project._id },
-});
+      const existingProject = await Project.exists({
+        key: projectKey,
+        organization: project.organization,
+        _id: { $ne: project._id },
+      });
 
       if (existingProject) {
         return res.status(409).json({
@@ -685,7 +730,6 @@ export const updateProject = async (
       }
     }
 
-    // CHANGE PROJECT OWNER
     if (ownerId !== undefined) {
       if (
         typeof ownerId !== "string" ||
@@ -707,14 +751,15 @@ export const updateProject = async (
         });
       }
 
-      const isOrganizationMember = organization.members.some(
-        (member) => member.toString() === ownerId
+      const newOwnerRole = getOrganizationRole(
+        organization,
+        ownerId
       );
 
-      if (!isOrganizationMember) {
+      if (!newOwnerRole || newOwnerRole === "Viewer") {
         return res.status(400).json({
           message:
-            "The new project owner must belong to the project organization",
+            "The new project owner must be an organization Owner, Admin, or Member",
         });
       }
 
@@ -733,12 +778,8 @@ export const updateProject = async (
 
     await project.save();
 
-    // Update existing task keys if the project key changed.
     if (keyChanged && project.key) {
-      await updateProjectTaskKeys(
-        project._id,
-        project.key
-      );
+      await updateProjectTaskKeys(project._id, project.key);
     }
 
     const updatedProject = await Project.findById(project._id)
@@ -752,11 +793,12 @@ export const updateProject = async (
   } catch (error) {
     console.error("UPDATE PROJECT ERROR:", error);
 
-  if ((error as any)?.code === 11000) {
-  return res.status(409).json({
-    message: "This project key is already in use in this organization.",
-  });
-}
+    if ((error as any)?.code === 11000) {
+      return res.status(409).json({
+        message: "This project key is already in use in this organization.",
+      });
+    }
+
     return res.status(500).json({
       message: "Failed to update project",
       error: error instanceof Error ? error.message : error,
@@ -773,7 +815,7 @@ export const deleteProject = async (
   res: Response
 ) => {
   try {
-    const { id } = req.params;
+    const id = routeParam(req.params.id);
     const userId = (req as any).userId;
 
     if (!userId) {
@@ -796,15 +838,12 @@ export const deleteProject = async (
       });
     }
 
-    const canManage = await canManageProject(
-      project,
-      userId
-    );
+    const canManage = await canManageProject(project, userId);
 
     if (!canManage) {
       return res.status(403).json({
         message:
-          "Only the project owner or organization admin can delete this project",
+          "Only organization Owners and Admins can delete this project",
       });
     }
 
@@ -840,7 +879,7 @@ export const addProjectMember = async (
   res: Response
 ) => {
   try {
-    const { id } = req.params;
+    const id = routeParam(req.params.id);
     const { userId: newMemberId } = req.body;
     const loggedInUserId = (req as any).userId;
 
@@ -881,7 +920,7 @@ export const addProjectMember = async (
     if (!canManage) {
       return res.status(403).json({
         message:
-          "Only the project owner or organization admin can add members",
+          "Only organization Owners and Admins can add project members",
       });
     }
 
@@ -895,14 +934,15 @@ export const addProjectMember = async (
 
     await ensureDefaultProjectMembers(project, organization);
 
-    const isOrganizationMember = organization.members.some(
-      (member) => member.toString() === newMemberId
+    const newMemberRole = getOrganizationRole(
+      organization,
+      newMemberId
     );
 
-    if (!isOrganizationMember) {
+    if (!newMemberRole || newMemberRole === "Viewer") {
       return res.status(400).json({
         message:
-          "User must belong to the project organization first",
+          "User must be an organization Owner, Admin, or Member to be added to a project",
       });
     }
 
@@ -955,7 +995,7 @@ export const getProjectMembers = async (
   res: Response
 ) => {
   try {
-    const { id } = req.params;
+    const id = routeParam(req.params.id);
     const userId = (req as any).userId;
 
     if (!userId) {
@@ -978,26 +1018,13 @@ export const getProjectMembers = async (
       });
     }
 
-    const isProjectMember = project.members.some(
-      (member) => member.toString() === userId
-    );
+    const hasAccess = await canAccessProject(project, userId);
 
-    const canManage = await canManageProject(
-      project,
-      userId
-    );
-
-    if (!isProjectMember && !canManage) {
+    if (!hasAccess) {
       return res.status(403).json({
         message:
           "You do not have access to this project's members",
       });
-    }
-
-    const organization = await getProjectOrganization(project);
-
-    if (organization) {
-      await ensureDefaultProjectMembers(project, organization);
     }
 
     const populatedProject = await project.populate(
@@ -1028,7 +1055,8 @@ export const removeProjectMember = async (
   res: Response
 ) => {
   try {
-    const { id, memberId } = req.params;
+    const id = routeParam(req.params.id);
+    const memberId = routeParam(req.params.memberId);
     const loggedInUserId = (req as any).userId;
 
     if (!loggedInUserId) {
@@ -1038,7 +1066,6 @@ export const removeProjectMember = async (
     }
 
     if (
-      typeof memberId !== "string" ||
       !mongoose.isValidObjectId(id) ||
       !mongoose.isValidObjectId(memberId)
     ) {
@@ -1063,7 +1090,7 @@ export const removeProjectMember = async (
     if (!canManage) {
       return res.status(403).json({
         message:
-          "Only the project owner or organization admin can manage project members",
+          "Only organization Owners and Admins can manage project members",
       });
     }
 
@@ -1077,18 +1104,22 @@ export const removeProjectMember = async (
 
     await ensureDefaultProjectMembers(project, organization);
 
-    // Neither the project owner nor the organization Owner
-    // can be removed from the project members list.
-    const isOrganizationOwner =
-      organization.admin?.toString() === memberId;
+    // Organization Owners, Admins, and Members are automatically
+    // included in every project, so they cannot be removed here.
+    const memberRole = getOrganizationRole(
+      organization,
+      memberId
+    );
 
     if (
       project.owner.toString() === memberId ||
-      isOrganizationOwner
+      memberRole === "Owner" ||
+      memberRole === "Admin" ||
+      memberRole === "Member"
     ) {
       return res.status(400).json({
         message:
-          "The project owner and organization Owner cannot be removed from project members",
+          "The project owner and organization Owners, Admins, and Members cannot be removed from project members",
       });
     }
 
@@ -1103,23 +1134,11 @@ export const removeProjectMember = async (
     }
 
     // Check whether this member has unfinished assigned tasks.
-    const projectIdString = Array.isArray(id) ? id[0] : id;
-    const memberIdString = Array.isArray(memberId) ? memberId[0] : memberId;
-
-    if (!projectIdString || !memberIdString) {
-      return res.status(400).json({
-        message: "Invalid project or member ID",
-      });
-    }
-
-    const taskFilter: any = {
-      project: new mongoose.Types.ObjectId(projectIdString),
-      assignee: new mongoose.Types.ObjectId(memberIdString),
+    const assignedTasks = await Task.find({
+      project: id,
+      assignee: memberId,
       status: { $ne: "Done" },
-    };
-
-    const assignedTasks = await Task.find(taskFilter)
-      .select("taskKey title status");
+    } as any).select("taskKey title status");
 
     if (assignedTasks.length > 0) {
       return res.status(400).json({
@@ -1134,7 +1153,7 @@ export const removeProjectMember = async (
       });
     }
 
-    // Remove the member from the project.
+    // Remove the project-only member from this project.
     project.members = project.members.filter(
       (member) => member.toString() !== memberId
     );

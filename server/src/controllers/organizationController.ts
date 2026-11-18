@@ -2,25 +2,23 @@
 import { type Request, type Response } from "express";
 import mongoose from "mongoose";
 import { createHash, randomBytes } from "node:crypto";
+import bcrypt from "bcryptjs";
 
 import Organization from "../models/Organization.js";
 import User from "../models/User.js";
 import OrganizationInvitation from "../models/OrganizationInvitation.js";
 import Project from "../models/project.js";
 import TaskCounter from "../models/taskCounter.js";
+import Task from "../models/task.js";
 
 import { sendOrganizationInvitationEmail } from "../services/emailService.js";
 import type { OrganizationRole } from "../models/Organization.js";
-import bcrypt from "bcryptjs";
-import Task from "../models/task.js";
 
 // --------------------------------------------------
 // HELPERS
 // --------------------------------------------------
 
-function routeParam(
-  value: string | string[] | undefined
-): string {
+function routeParam(value: string | string[] | undefined): string {
   return typeof value === "string" ? value : "";
 }
 
@@ -43,7 +41,13 @@ function getMemberRole(
   return membership?.role;
 }
 
-// Synchronize members and memberships for existing organizations.
+function isProjectAccessRole(
+  role: OrganizationRole | undefined
+): boolean {
+  return role === "Owner" || role === "Admin" || role === "Member";
+}
+
+// Synchronize existing organization members and membership records.
 async function ensureMemberships(organization: any) {
   organization.members = organization.members ?? [];
   organization.memberships = organization.memberships ?? [];
@@ -54,7 +58,6 @@ async function ensureMemberships(organization: any) {
     throw new Error("Organization owner is missing");
   }
 
-  // Collect unique member IDs.
   const memberIds = new Set<string>();
 
   for (const member of organization.members) {
@@ -67,7 +70,6 @@ async function ensureMemberships(organization: any) {
     }
   }
 
-  // Collect unique membership records and preserve roles.
   const membershipMap = new Map<string, any>();
 
   for (const membership of organization.memberships) {
@@ -87,15 +89,12 @@ async function ensureMemberships(organization: any) {
     }
   }
 
-  // Include every membership user in the members array.
   for (const memberId of membershipMap.keys()) {
     memberIds.add(memberId);
   }
 
-  // Always include the current Owner.
   memberIds.add(adminId);
 
-  // Create missing membership records.
   for (const memberId of memberIds) {
     if (!membershipMap.has(memberId)) {
       membershipMap.set(memberId, {
@@ -105,26 +104,143 @@ async function ensureMemberships(organization: any) {
     }
   }
 
-  // Ensure the current Owner has the Owner role.
   const ownerMembership = membershipMap.get(adminId);
 
   if (ownerMembership) {
     ownerMembership.role = "Owner";
   }
 
-  // Save synchronized arrays.
   organization.members = Array.from(memberIds).map(
     (memberId) => new mongoose.Types.ObjectId(memberId)
   );
 
-  organization.memberships = Array.from(
-    membershipMap.values()
-  );
+  organization.memberships = Array.from(membershipMap.values());
 
   organization.markModified("members");
   organization.markModified("memberships");
 
   await organization.save();
+}
+
+// Add or remove a user from every project according to their organization role.
+async function syncUserProjectMembership(
+  organizationId: string,
+  userId: mongoose.Types.ObjectId | string,
+  role: OrganizationRole
+) {
+  const userObjectId = new mongoose.Types.ObjectId(userId.toString());
+
+  if (isProjectAccessRole(role)) {
+    await Project.updateMany(
+      { organization: organizationId },
+      { $addToSet: { members: userObjectId } }
+    );
+  } else {
+    await Project.updateMany(
+      { organization: organizationId },
+      { $pull: { members: userObjectId } }
+    );
+  }
+}
+
+// Add a user to one project without adding them to the organization.
+async function addUserToProject(
+  project: any,
+  userId: mongoose.Types.ObjectId | string
+) {
+  const userObjectId = new mongoose.Types.ObjectId(userId.toString());
+
+  await Project.updateOne(
+    { _id: project._id },
+    { $addToSet: { members: userObjectId } }
+  );
+}
+
+// Shared invitation acceptance logic for ID and token acceptance.
+async function acceptInvitationForUser(
+  invitation: any,
+  user: any
+) {
+  const organization = await Organization.findOne({
+    org_id: invitation.organizationId,
+  });
+
+  if (!organization) {
+    throw new Error("Organization not found");
+  }
+
+  await ensureMemberships(organization);
+
+  const invitedProject = invitation.projectId
+    ? await Project.findOne({
+        _id: invitation.projectId,
+        organization: organization.org_id,
+      })
+    : null;
+
+  if (invitation.projectId && !invitedProject) {
+    throw new Error("The invited project no longer exists");
+  }
+
+  const userId = user._id.toString();
+
+  // PROJECT INVITATION:
+  // Add the user only to the selected project.
+  // Do not create organization membership.
+  if (invitation.projectId) {
+    const existingOrganizationRole = getMemberRole(
+      organization,
+      userId
+    );
+
+    // Organization Viewers do not receive project access.
+    if (existingOrganizationRole === "Viewer") {
+      throw new Error(
+        "Organization Viewers cannot access projects"
+      );
+    }
+
+    await addUserToProject(invitedProject, user._id);
+
+    return {
+      organization,
+      invitedProject,
+      invitationScope: "project",
+    };
+  }
+
+  // ORGANIZATION INVITATION:
+  // Add the user to the organization if they are not already a member.
+  let effectiveRole = getMemberRole(organization, userId);
+
+  if (!effectiveRole) {
+    organization.members.push(user._id);
+
+    organization.memberships.push({
+      user: user._id,
+      role: invitation.role,
+    });
+
+    effectiveRole = invitation.role;
+
+    await organization.save();
+  }
+
+  // Owner, Admin and Member receive access to every project.
+  // Viewer does not receive automatic project access.
+  const roleToSync: OrganizationRole =
+  effectiveRole ?? invitation.role;
+
+await syncUserProjectMembership(
+  organization.org_id,
+  user._id,
+  roleToSync
+);
+  return {
+    organization,
+    invitedProject: null,
+    invitationScope: "organization",
+  };
 }
 
 // --------------------------------------------------
@@ -161,7 +277,8 @@ export const updateOrganization = async (
 
     if (role !== "Owner" && role !== "Admin") {
       return res.status(403).json({
-        message: "Only an organization Owner or Admin can change settings",
+        message:
+          "Only an organization Owner or Admin can change settings",
       });
     }
 
@@ -292,7 +409,8 @@ export const updateOrganizationMemberRole = async (
 
     if (actorRole !== "Owner" && actorRole !== "Admin") {
       return res.status(403).json({
-        message: "Only an organization Owner or Admin can change roles",
+        message:
+          "Only an organization Owner or Admin can change roles",
       });
     }
 
@@ -351,6 +469,23 @@ export const updateOrganizationMemberRole = async (
     }
 
     await organization.save();
+
+    // Synchronize the changed member's project access.
+    await syncUserProjectMembership(
+      organization.org_id,
+      memberId,
+      nextRole
+    );
+
+    // If ownership was transferred, the previous Owner becomes Admin.
+    // Both Owner and Admin retain access to all projects.
+    if (nextRole === "Owner") {
+      await syncUserProjectMembership(
+        organization.org_id,
+        userId,
+        "Admin"
+      );
+    }
 
     return res.status(200).json({
       message: "Member role updated successfully",
@@ -411,7 +546,8 @@ export const removeOrganizationMember = async (
 
     if (actorRole !== "Owner" && actorRole !== "Admin") {
       return res.status(403).json({
-        message: "Only an organization Owner or Admin can remove members",
+        message:
+          "Only an organization Owner or Admin can remove members",
       });
     }
 
@@ -448,10 +584,9 @@ export const removeOrganizationMember = async (
 
     await organization.save();
 
+    // Remove the user from all projects in this organization.
     await Project.updateMany(
-      {
-        organization: organization.org_id,
-      },
+      { organization: organization.org_id },
       {
         $pull: {
           members: new mongoose.Types.ObjectId(memberId),
@@ -468,7 +603,8 @@ export const removeOrganizationMember = async (
 
     return res.status(500).json({
       message: "Failed to remove member",
-      error: error instanceof Error ? error.message : "Unknown error",
+      error:
+        error instanceof Error ? error.message : "Unknown error",
     });
   }
 };
@@ -491,6 +627,7 @@ export const createOrganizationInvitation = async (
         : "";
 
     const role: OrganizationRole = req.body.role ?? "Member";
+
     const projectId =
       typeof req.body.projectId === "string" && req.body.projectId
         ? req.body.projectId
@@ -541,7 +678,7 @@ export const createOrganizationInvitation = async (
 
     const existingUser = await User.findOne({ email });
 
-    let invitedProject = null;
+    let invitedProject: any = null;
 
     if (projectId) {
       if (!mongoose.isValidObjectId(projectId)) {
@@ -562,20 +699,39 @@ export const createOrganizationInvitation = async (
       }
     }
 
-    if (
-      existingUser &&
-      organization.members.some(
-        (member: any) =>
-          member.toString() === existingUser._id.toString()
-      ) &&
-      (!invitedProject ||
+    if (existingUser) {
+      const existingRole = getMemberRole(
+        organization,
+        existingUser._id.toString()
+      );
+
+      if (!invitedProject && existingRole) {
+        return res.status(409).json({
+          message: "This person is already an organization member",
+        });
+      }
+
+      if (
+        invitedProject &&
+        existingRole === "Viewer"
+      ) {
+        return res.status(409).json({
+          message:
+            "Organization Viewers cannot receive project access",
+        });
+      }
+
+      if (
+        invitedProject &&
         invitedProject.members.some(
-          (memberId) => memberId.toString() === existingUser._id.toString()
-        ))
-    ) {
-      return res.status(409).json({
-        message: "This person is already a member",
-      });
+          (memberId: any) =>
+            memberId.toString() === existingUser._id.toString()
+        )
+      ) {
+        return res.status(409).json({
+          message: "This person already has access to this project",
+        });
+      }
     }
 
     const inviteToken = randomBytes(32).toString("base64url");
@@ -588,22 +744,34 @@ export const createOrganizationInvitation = async (
       Date.now() + 7 * 24 * 60 * 60 * 1000
     );
 
+    // Different invitations have different scope keys.
+    // Organization invitation:
+    // ORG_ID:email:organization
+    //
+    // Project invitation:
+    // ORG_ID:email:project:PROJECT_ID
+    const scopeKey = invitedProject
+      ? `${org_id}:${email}:project:${invitedProject._id}`
+      : `${org_id}:${email}:organization`;
+
     const invitation = await OrganizationInvitation.findOneAndUpdate(
-      {
-        organizationId: org_id,
-        email,
-      },
+      { scopeKey },
       {
         $set: {
           organizationId: org_id,
           email,
-          ...(invitedProject ? { projectId: invitedProject._id } : {}),
           role,
           invitedBy: userId,
+          scopeKey,
           tokenHash,
           expiresAt,
+          ...(invitedProject
+            ? { projectId: invitedProject._id }
+            : {}),
         },
-        ...(!invitedProject ? { $unset: { projectId: 1 } } : {}),
+        ...(!invitedProject
+          ? { $unset: { projectId: 1 } }
+          : {}),
       },
       {
         upsert: true,
@@ -640,6 +808,7 @@ export const createOrganizationInvitation = async (
         email: invitation.email,
         role: invitation.role,
         projectId: invitation.projectId?.toString(),
+        scopeKey: invitation.scopeKey,
         expiresAt: invitation.expiresAt,
       },
       emailSent,
@@ -685,10 +854,7 @@ export const createOrganizationWithFirstProject = async (
       });
     }
 
-    if (
-      typeof org_name !== "string" ||
-      !org_name.trim()
-    ) {
+    if (typeof org_name !== "string" || !org_name.trim()) {
       return res.status(400).json({
         message: "Organization name is required",
       });
@@ -787,7 +953,8 @@ export const createOrganizationWithFirstProject = async (
     });
 
     return res.status(201).json({
-      message: "Organization and first project created successfully",
+      message:
+        "Organization and first project created successfully",
       organization,
       project,
     });
@@ -818,13 +985,15 @@ export const createOrganizationWithFirstProject = async (
 
     if ((error as any)?.code === 11000) {
       return res.status(409).json({
-        message: "The issue key or organization URL is already in use.",
+        message:
+          "The issue key or organization URL is already in use.",
       });
     }
 
     return res.status(500).json({
       message: "Failed to create organization and first project",
-      error: error instanceof Error ? error.message : error,
+      error:
+        error instanceof Error ? error.message : error,
     });
   }
 };
@@ -997,9 +1166,21 @@ export const acceptOrganizationInvitation = async (
   res: Response
 ) => {
   try {
-    const user = await User.findById(
-      (req as any).userId
-    ).select("email");
+    const userId = (req as any).userId;
+
+    if (!userId) {
+      return res.status(401).json({
+        message: "User not authenticated",
+      });
+    }
+
+    const user = await User.findById(userId).select("email");
+
+    if (!user?.email) {
+      return res.status(401).json({
+        message: "User email is unavailable",
+      });
+    }
 
     const invitationId = routeParam(req.params.invitationId);
 
@@ -1020,11 +1201,12 @@ export const acceptOrganizationInvitation = async (
     }
 
     if (
-      !user?.email ||
-      user.email.toLowerCase() !== invitation.email
+      user.email.trim().toLowerCase() !==
+      invitation.email.trim().toLowerCase()
     ) {
       return res.status(403).json({
-        message: "This invitation belongs to another email address",
+        message:
+          "This invitation belongs to another email address",
       });
     }
 
@@ -1037,68 +1219,38 @@ export const acceptOrganizationInvitation = async (
       });
     }
 
-    const organization = await Organization.findOne({
-      org_id: invitation.organizationId,
-    });
-
-    if (!organization) {
-      return res.status(404).json({
-        message: "Organization not found",
-      });
-    }
-
-    await ensureMemberships(organization);
-
-    const invitedProject = invitation.projectId
-      ? await Project.findOne({
-          _id: invitation.projectId,
-          organization: organization.org_id,
-        })
-      : null;
-
-    if (invitation.projectId && !invitedProject) {
-      return res.status(404).json({
-        message: "The invited project no longer exists",
-      });
-    }
-
-    const alreadyMember = organization.members.some(
-      (member: any) =>
-        member.toString() === user._id.toString()
+    const result = await acceptInvitationForUser(
+      invitation,
+      user
     );
-
-    if (!alreadyMember) {
-      organization.members.push(user._id);
-
-      organization.memberships.push({
-        user: user._id,
-        role: invitation.role,
-      });
-    }
-
-    if (!alreadyMember) {
-      await organization.save();
-    }
-
-    if (
-      invitedProject &&
-      !invitedProject.members.some(
-        (memberId) => memberId.toString() === user._id.toString()
-      )
-    ) {
-      invitedProject.members.push(user._id);
-      await invitedProject.save();
-    }
 
     await invitation.deleteOne();
 
     return res.status(200).json({
-      message: "Invitation accepted",
-      organization,
-      invitedProjectId: invitedProject?._id.toString(),
+      message: "Invitation accepted successfully",
+      organization: result.organization,
+      invitedProjectId:
+        result.invitedProject?._id.toString(),
+      invitationScope: result.invitationScope,
     });
   } catch (error) {
     console.error("ACCEPT ORGANIZATION INVITATION ERROR:", error);
+
+    const message =
+      error instanceof Error ? error.message : "";
+
+    if (
+      message === "Organization not found" ||
+      message === "The invited project no longer exists"
+    ) {
+      return res.status(404).json({ message });
+    }
+
+    if (
+      message === "Organization Viewers cannot access projects"
+    ) {
+      return res.status(403).json({ message });
+    }
 
     return res.status(500).json({
       message: "Failed to accept invitation",
@@ -1153,7 +1305,8 @@ export const acceptOrganizationInvitationByToken = async (
 
     if (!invitation) {
       return res.status(404).json({
-        message: "Invitation link is invalid or has expired",
+        message:
+          "Invitation link is invalid or has expired",
       });
     }
 
@@ -1167,69 +1320,41 @@ export const acceptOrganizationInvitationByToken = async (
       });
     }
 
-    const organization = await Organization.findOne({
-      org_id: invitation.organizationId,
-    });
-
-    if (!organization) {
-      return res.status(404).json({
-        message: "Organization not found",
-      });
-    }
-
-    await ensureMemberships(organization);
-
-    const invitedProject = invitation.projectId
-      ? await Project.findOne({
-          _id: invitation.projectId,
-          organization: organization.org_id,
-        })
-      : null;
-
-    if (invitation.projectId && !invitedProject) {
-      return res.status(404).json({
-        message: "The invited project no longer exists",
-      });
-    }
-
-    const alreadyMember = organization.members.some(
-      (member: any) =>
-        member.toString() === user._id.toString()
+    const result = await acceptInvitationForUser(
+      invitation,
+      user
     );
-
-    if (!alreadyMember) {
-      organization.members.push(user._id);
-      organization.memberships.push({
-        user: user._id,
-        role: invitation.role,
-      });
-      await organization.save();
-    }
-
-    if (
-      invitedProject &&
-      !invitedProject.members.some(
-        (memberId) => memberId.toString() === user._id.toString()
-      )
-    ) {
-      invitedProject.members.push(user._id);
-      await invitedProject.save();
-    }
 
     await invitation.deleteOne();
 
     return res.status(200).json({
-      message: alreadyMember
-        ? "Project invitation accepted successfully"
-        : "Invitation accepted successfully",
-      organization,
-      invitedProjectId: invitedProject?._id.toString(),
+      message: "Invitation accepted successfully",
+      organization: result.organization,
+      invitedProjectId:
+        result.invitedProject?._id.toString(),
+      invitationScope: result.invitationScope,
     });
   } catch (error) {
     console.error(
       "ACCEPT ORGANIZATION INVITATION BY TOKEN ERROR:",
       error
     );
+
+    const message =
+      error instanceof Error ? error.message : "";
+
+    if (
+      message === "Organization not found" ||
+      message === "The invited project no longer exists"
+    ) {
+      return res.status(404).json({ message });
+    }
+
+    if (
+      message === "Organization Viewers cannot access projects"
+    ) {
+      return res.status(403).json({ message });
+    }
 
     return res.status(500).json({
       message: "Failed to accept invitation",
@@ -1255,10 +1380,7 @@ export const createOrganization = async (
       });
     }
 
-    if (
-      typeof org_name !== "string" ||
-      !org_name.trim()
-    ) {
+    if (typeof org_name !== "string" || !org_name.trim()) {
       return res.status(400).json({
         message: "Organization name is required",
       });
@@ -1395,11 +1517,15 @@ export const addMember = async (
 
     await ensureMemberships(organization);
 
-    const role = getMemberRole(organization, loggedInUserId);
+    const role = getMemberRole(
+      organization,
+      loggedInUserId
+    );
 
     if (role !== "Owner" && role !== "Admin") {
       return res.status(403).json({
-        message: "Only an organization Owner or Admin can add members",
+        message:
+          "Only an organization Owner or Admin can add members",
       });
     }
 
@@ -1429,6 +1555,13 @@ export const addMember = async (
     });
 
     await organization.save();
+
+    // Directly added Members receive access to every project.
+    await syncUserProjectMembership(
+      organization.org_id,
+      user._id,
+      "Member"
+    );
 
     return res.status(200).json({
       message: "Member added successfully",
@@ -1477,7 +1610,6 @@ export const getOrganizationById = async (
 
     const userId = loggedInUserId.toString();
 
-    // Check membership in either array before repairing old records.
     const isOwner =
       organization.admin?.toString() === userId;
 
@@ -1492,14 +1624,13 @@ export const getOrganizationById = async (
 
     if (!isOwner && !isInMembers && !isInMemberships) {
       return res.status(403).json({
-        message: "You are not a member of this organization",
+        message:
+          "You are not a member of this organization",
       });
     }
 
-    // Synchronize both arrays.
     await ensureMemberships(organization);
 
-    // Populate user details for frontend display.
     await organization.populate([
       {
         path: "admin",
@@ -1583,7 +1714,6 @@ export const deleteOrganization = async (
       });
     }
 
-    // Find the organization.
     const organization = await Organization.findOne({ org_id });
 
     if (!organization) {
@@ -1592,14 +1722,13 @@ export const deleteOrganization = async (
       });
     }
 
-    // Only the actual organization Owner can delete it.
     if (organization.admin?.toString() !== userId.toString()) {
       return res.status(403).json({
-        message: "Only the organization Owner can delete this organization",
+        message:
+          "Only the organization Owner can delete this organization",
       });
     }
 
-    // Fetch the logged-in user's password hash.
     const user = await User.findById(userId).select("+password");
 
     if (!user || !user.password) {
@@ -1608,7 +1737,6 @@ export const deleteOrganization = async (
       });
     }
 
-    // Verify the current account password.
     const isPasswordCorrect = await bcrypt.compare(
       password,
       user.password
@@ -1616,18 +1744,19 @@ export const deleteOrganization = async (
 
     if (!isPasswordCorrect) {
       return res.status(401).json({
-        message: "Incorrect password. Please try again.",
+        message:
+          "Incorrect password. Please try again.",
       });
     }
 
-    // Find all projects belonging to this organization.
     const projects = await Project.find({
       organization: org_id,
     }).select("_id");
 
-    const projectIds = projects.map((project) => project._id);
+    const projectIds = projects.map(
+      (project) => project._id
+    );
 
-    // Delete related tasks.
     await Task.deleteMany({
       $or: [
         { organization: org_id },
@@ -1635,24 +1764,20 @@ export const deleteOrganization = async (
       ],
     });
 
-    // Delete task counters belonging to those projects.
     await TaskCounter.deleteMany({
       _id: {
         $in: projectIds.map((id) => id.toString()),
       },
     });
 
-    // Delete organization projects.
     await Project.deleteMany({
       organization: org_id,
     });
 
-    // Delete all invitations belonging to this organization.
     await OrganizationInvitation.deleteMany({
       organizationId: org_id,
     });
 
-    // Finally, delete the organization itself.
     await organization.deleteOne();
 
     return res.status(200).json({

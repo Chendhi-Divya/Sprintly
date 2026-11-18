@@ -8,6 +8,7 @@ export interface IOrganizationInvitation extends Document {
   email: string;
   role: OrganizationRole;
   invitedBy: mongoose.Types.ObjectId;
+  scopeKey: string;
   tokenHash?: string;
   expiresAt: Date;
   createdAt: Date;
@@ -15,34 +16,61 @@ export interface IOrganizationInvitation extends Document {
 
 const invitationSchema = new Schema<IOrganizationInvitation>(
   {
-    organizationId: { type: String, required: true, index: true },
+    organizationId: {
+      type: String,
+      required: true,
+      index: true,
+    },
+
     projectId: {
       type: Schema.Types.ObjectId,
       ref: "Project",
       default: undefined,
     },
-    email: { type: String, required: true, lowercase: true, trim: true },
+
+    email: {
+      type: String,
+      required: true,
+      lowercase: true,
+      trim: true,
+    },
+
     role: {
       type: String,
       enum: ["Admin", "Member", "Viewer"],
       default: "Member",
     },
+
     invitedBy: {
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
     },
-    tokenHash: { type: String, sparse: true, unique: true, select: false },
+
+    scopeKey: {
+      type: String,
+      required: true,
+      unique: true,
+    },
+
+    tokenHash: {
+      type: String,
+      sparse: true,
+      unique: true,
+      select: false,
+    },
+
     expiresAt: {
       type: Date,
       required: true,
       index: true,
     },
   },
-  { timestamps: true, versionKey: false }
+  {
+    timestamps: true,
+    versionKey: false,
+  }
 );
-
-invitationSchema.index({ organizationId: 1, email: 1 }, { unique: true });
 
 export default mongoose.model<IOrganizationInvitation>(
   "OrganizationInvitation",
